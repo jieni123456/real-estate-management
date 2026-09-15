@@ -1,0 +1,38 @@
+# ---- Java 编译产物 ----
+*.class
+out/
+bin/
+target/
+build/
+
+# ---- IntelliJ IDEA ----
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# ---- Eclipse / NetBeans ----
+.classpath
+.project
+.settings/
+.apt_generated
+.factorypath
+nbproject/private/
+nbbuild/
+dist/
+nbdist/
+
+# ---- VS Code ----
+.vscode/
+
+# ---- 系统文件 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 日志与临时文件 ----
+*.log
+*.tmp
+*.bak
+~$*
