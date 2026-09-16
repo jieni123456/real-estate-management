@@ -1,9 +1,10 @@
 package view;
 
 import controller.CustomerController;
+import model.Customer;
+import util.Result;
 import util.Theme;
 
-import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
@@ -23,6 +24,7 @@ import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dialog;
 import java.awt.Dimension;
@@ -30,6 +32,7 @@ import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -41,7 +44,11 @@ public class CustomerView extends JPanel {
     private final Consumer<String> statusReporter;
 
     private final JTable customerTable;
+    private final JButton editButton = new JButton("编辑客户");
     private final JButton deleteButton = new JButton("删除客户");
+
+    /** 与表格行一一对应的数据，避免再从表格单元格里反解字段 */
+    private List<Customer> currentCustomers = new ArrayList<>();
 
     public CustomerView(CustomerController customerController, Consumer<String> statusReporter) {
         this.customerController = customerController;
@@ -80,7 +87,13 @@ public class CustomerView extends JPanel {
         buttons.setOpaque(false);
 
         JButton addButton = primaryButton("添加客户");
-        addButton.addActionListener(e -> showAddCustomerDialog());
+        addButton.addActionListener(e -> showCustomerDialog(null));
+
+        editButton.setFont(Theme.FONT_BODY);
+        editButton.setFocusPainted(false);
+        editButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        editButton.addActionListener(e -> editSelectedCustomer());
+        styleAsSecondary(editButton);
 
         deleteButton.setFont(Theme.FONT_BODY);
         deleteButton.setFocusPainted(false);
@@ -91,6 +104,7 @@ public class CustomerView extends JPanel {
         refreshButton.addActionListener(e -> refresh());
 
         buttons.add(addButton);
+        buttons.add(editButton);
         buttons.add(deleteButton);
         buttons.add(refreshButton);
 
@@ -134,16 +148,21 @@ public class CustomerView extends JPanel {
 
     /** 重新读取并刷新表格，同时把记录数写入底部状态栏 */
     public void refresh() {
+        currentCustomers = customerController.getAllCustomers();
+
         DefaultTableModel model = (DefaultTableModel) customerTable.getModel();
         model.setRowCount(0);
-
-        List<Object[]> customers = customerController.getAllCustomers();
-        for (Object[] customer : customers) {
-            model.addRow(customer);
+        for (Customer customer : currentCustomers) {
+            model.addRow(new Object[]{
+                    customer.getId(),
+                    customer.getName(),
+                    customer.getPhone(),
+                    customer.getRequirements()
+            });
         }
 
         if (statusReporter != null) {
-            statusReporter.accept("共 " + customers.size() + " 条客户记录");
+            statusReporter.accept("共 " + currentCustomers.size() + " 条客户记录");
         }
     }
 
@@ -175,22 +194,26 @@ public class CustomerView extends JPanel {
         deleteButton.repaint();
     }
 
-    // ------------------------------------------------------------ 删除逻辑
+    // ------------------------------------------------------------ 编辑 / 删除
+
+    private void editSelectedCustomer() {
+        Customer selected = getSelectedCustomer("编辑");
+        if (selected == null) {
+            return;
+        }
+        showCustomerDialog(selected);
+    }
 
     private void deleteSelectedCustomer() {
-        int selectedRow = customerTable.getSelectedRow();
-        if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "请先选择要删除的客户", "提示",
-                    JOptionPane.WARNING_MESSAGE);
+        Customer selected = getSelectedCustomer("删除");
+        if (selected == null) {
             return;
         }
 
-        String customerId = String.valueOf(customerTable.getValueAt(selectedRow, 0));
-        String customerName = String.valueOf(customerTable.getValueAt(selectedRow, 1));
-
         Object[] options = {"取消", "确认删除"};
         int choice = JOptionPane.showOptionDialog(this,
-                "确定要删除客户 " + customerName + "（ID: " + customerId + "）吗？此操作不可撤销。",
+                "确定要删除客户 " + selected.getName() + "（ID: " + selected.getId()
+                        + "）吗？此操作不可撤销。",
                 "确认删除",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE,
@@ -202,32 +225,66 @@ public class CustomerView extends JPanel {
             return;
         }
 
-        if (customerController.deleteCustomer(customerId)) {
-            Toast.success(this, "客户删除成功");
+        Result result = customerController.deleteCustomer(selected.getId());
+        if (result.isSuccess()) {
+            Toast.success(this, result.getMessage());
             refresh();
         } else {
-            JOptionPane.showMessageDialog(this, "删除客户失败", "错误",
-                    JOptionPane.ERROR_MESSAGE);
+            warn(this, result.getMessage());
         }
     }
 
-    // -------------------------------------------------------------- 添加对话框
+    /**
+     * 取当前选中的客户。用 convertRowIndexToModel 换算行号，
+     * 这样将来开启表头排序（G-005）也不会取错行。
+     */
+    private Customer getSelectedCustomer(String action) {
+        int viewRow = customerTable.getSelectedRow();
+        if (viewRow == -1) {
+            warn(this, "请先选择要" + action + "的客户");
+            return null;
+        }
 
-    private void showAddCustomerDialog() {
-        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this), "添加新客户",
-                Dialog.ModalityType.APPLICATION_MODAL);
+        int modelRow = customerTable.convertRowIndexToModel(viewRow);
+        if (modelRow < 0 || modelRow >= currentCustomers.size()) {
+            warn(this, "数据已发生变化，请重新选择");
+            refresh();
+            return null;
+        }
+        return currentCustomers.get(modelRow);
+    }
+
+    // -------------------------------------------------------------- 新增 / 编辑对话框
+
+    /**
+     * 新增与编辑共用一个对话框。
+     *
+     * @param existing 为 null 表示新增；否则为编辑，此时客户ID 只读
+     */
+    private void showCustomerDialog(Customer existing) {
+        final boolean editing = existing != null;
+
+        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this),
+                editing ? "编辑客户" : "添加新客户", Dialog.ModalityType.APPLICATION_MODAL);
         dialog.setLayout(new BorderLayout());
 
-        JLabel title = new JLabel("添加新客户");
+        JLabel title = new JLabel(editing ? "编辑客户" : "添加新客户");
         title.setFont(Theme.FONT_TITLE);
         title.setForeground(Theme.TEXT_HEADING);
         title.setBorder(new EmptyBorder(18, 20, 0, 20));
         dialog.add(title, BorderLayout.NORTH);
 
-        JTextField customerId = new JTextField();
-        JTextField name = new JTextField();
-        JTextField phone = new JTextField();
-        JTextField requirements = new JTextField();
+        JTextField customerId = new JTextField(editing ? existing.getId() : "");
+        JTextField name = new JTextField(editing ? existing.getName() : "");
+        JTextField phone = new JTextField(editing ? existing.getPhone() : "");
+        JTextField requirements = new JTextField(editing ? existing.getRequirements() : "");
+
+        if (editing) {
+            // 主键不可改：改主键等于换一条记录，语义上应是「删旧增新」
+            customerId.setEditable(false);
+            customerId.setBackground(Theme.DISABLED_BG);
+            customerId.setToolTipText("客户ID 是主键，编辑时不可修改");
+        }
 
         // 客户只有 4 个字段，语义一致，无需像房屋那样分组
         JPanel body = new JPanel();
@@ -243,27 +300,20 @@ public class CustomerView extends JPanel {
         JButton cancel = secondaryOutlineButton("取消");
         cancel.addActionListener(e -> dialog.dispose());
 
-        JButton submit = primaryButton("提交");
+        JButton submit = primaryButton(editing ? "保存" : "提交");
         submit.addActionListener(e -> {
-            if (customerId.getText().trim().isEmpty()) {
-                JOptionPane.showMessageDialog(dialog, "客户ID不能为空", "输入错误",
-                        JOptionPane.ERROR_MESSAGE);
-                return;
-            }
+            Result result = editing
+                    ? customerController.updateCustomer(customerId.getText(), name.getText(),
+                            phone.getText(), requirements.getText())
+                    : customerController.addCustomer(customerId.getText(), name.getText(),
+                            phone.getText(), requirements.getText());
 
-            boolean success = customerController.addCustomer(
-                    customerId.getText().trim(),
-                    name.getText().trim(),
-                    phone.getText().trim(),
-                    requirements.getText().trim());
-
-            if (success) {
-                Toast.success(this, "客户添加成功");
+            if (result.isSuccess()) {
+                Toast.success(this, result.getMessage());
                 refresh();
                 dialog.dispose();
             } else {
-                JOptionPane.showMessageDialog(dialog, "客户添加失败", "错误",
-                        JOptionPane.ERROR_MESSAGE);
+                warn(dialog, result.getMessage());
             }
         });
 
@@ -280,6 +330,11 @@ public class CustomerView extends JPanel {
     }
 
     // ---------------------------------------------------------------- 小工具
+
+    /** 统一的失败提示（校验不通过、ID 冲突、保存失败等） */
+    private void warn(Component parent, String message) {
+        JOptionPane.showMessageDialog(parent, message, "无法保存", JOptionPane.WARNING_MESSAGE);
+    }
 
     /** 两列排布的表单：每行两组「标签 + 输入框」 */
     private JPanel twoColumnForm(String[] labels, JTextField[] fields) {
@@ -336,11 +391,15 @@ public class CustomerView extends JPanel {
     private JButton secondaryOutlineButton(String text) {
         JButton button = new JButton(text);
         button.setFont(Theme.FONT_BODY);
-        button.setBackground(Theme.SURFACE);
-        button.setForeground(Theme.TEXT_PRIMARY);
-        button.setBorder(outlineBorder(Theme.BORDER_INPUT));
+        styleAsSecondary(button);
         button.setFocusPainted(false);
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         return button;
+    }
+
+    private void styleAsSecondary(JButton button) {
+        button.setBackground(Theme.SURFACE);
+        button.setForeground(Theme.TEXT_PRIMARY);
+        button.setBorder(outlineBorder(Theme.BORDER_INPUT));
     }
 }
