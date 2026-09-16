@@ -36,3 +36,15 @@ desktop.ini
 *.tmp
 *.bak
 ~$*
+
+# ---- 依赖 jar ----
+*.jar
+!com.realestate/lib/*.jar
+
+# ---- 本地配置（含凭据，禁止提交）----
+db.properties
+*.local
+.env
+
+# ---- 本地工具数据 ----
+.workbuddy/

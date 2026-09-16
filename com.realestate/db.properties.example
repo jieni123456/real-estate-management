@@ -1,0 +1,12 @@
+# ===================================================================
+# 数据库配置模板
+#
+# 用法：复制本文件为 db.properties，然后填写真实的数据库信息。
+#      db.properties 已被 .gitignore 排除，不会进入版本库。
+#
+# 优先级：环境变量 DB_URL / DB_USER / DB_PASSWORD  >  本文件  >  代码内置默认值
+# ===================================================================
+
+db.url=jdbc:mysql://localhost:3306/real_estate_db?useSSL=false&serverTimezone=UTC
+db.user=root
+db.password=your_password_here
