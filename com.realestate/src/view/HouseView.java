@@ -62,7 +62,7 @@ public class HouseView extends JPanel {
         add(header, BorderLayout.NORTH);
         add(scrollPane, BorderLayout.CENTER);
 
-        applyDeletePermission();
+        applyPermissions();
         refresh();
     }
 
@@ -153,12 +153,16 @@ public class HouseView extends JPanel {
     /**
      * 按当前用户权限启用或置灰「删除房屋」按钮。
      *
+     * <p><b>登录成功后必须由 MainView 再次调用本方法。</b>本视图是在登录之前就被
+     * 构造的（见 RealEstateSystem.main），那时 Session 里还没有用户，
+     * {@code Session.can} 按 fail-safe 返回 false，按钮必然是禁用态。
+     *
      * <p>界面层的置灰只是体验优化——真正的防护在 {@code HouseController.deleteHouse}。
      *
      * <p>这里显式指定禁用态的配色，而不依赖外观库的默认处理，
      * 以确保「灰底灰字」与正常的「红字红边」对比足够鲜明，用户一眼能看出是权限不足。
      */
-    private void applyDeletePermission() {
+    public void applyPermissions() {
         boolean allowed = houseController.canDelete();
         deleteButton.setEnabled(allowed);
 

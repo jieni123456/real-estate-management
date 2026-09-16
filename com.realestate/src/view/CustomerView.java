@@ -61,7 +61,7 @@ public class CustomerView extends JPanel {
         add(header, BorderLayout.NORTH);
         add(scrollPane, BorderLayout.CENTER);
 
-        applyDeletePermission();
+        applyPermissions();
         refresh();
     }
 
@@ -151,9 +151,13 @@ public class CustomerView extends JPanel {
 
     /**
      * 按当前用户权限启用或置灰「删除客户」按钮。
-     * 界面层置灰只是体验优化——真正的防护在 CustomerController.deleteCustomer。
+     *
+     * <p><b>登录成功后必须由 MainView 再次调用本方法。</b>本视图是在登录之前就被
+     * 构造的，那时 Session 里还没有用户，按钮必然是禁用态。
+     *
+     * <p>界面层置灰只是体验优化——真正的防护在 CustomerController.deleteCustomer。
      */
-    private void applyDeletePermission() {
+    public void applyPermissions() {
         boolean allowed = customerController.canDelete();
         deleteButton.setEnabled(allowed);
 

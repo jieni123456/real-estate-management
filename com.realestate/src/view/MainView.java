@@ -231,6 +231,12 @@ public class MainView extends JPanel {
             item.setVisible(Session.can(item.permission));
         }
 
+        // 两个子视图是在登录之前构造的，那时 Session 里还没有用户，
+        // 删除按钮必然处于禁用态。这里按已登录的角色重新应用一次按钮权限。
+        // 漏掉这一步会导致：无论用哪个账号登录，删除按钮都一直是灰的。
+        houseView.applyPermissions();
+        customerView.applyPermissions();
+
         NavItem firstAllowed = null;
         for (NavItem item : navItems) {
             if (item.isVisible()) {
@@ -270,6 +276,10 @@ public class MainView extends JPanel {
             item.selected = false;
             item.repaint();
         }
+
+        // Session 已清空，按钮权限同步复位为禁用，避免残留上一次登录的状态
+        houseView.applyPermissions();
+        customerView.applyPermissions();
 
         JOptionPane.showMessageDialog(this, "您已成功退出系统", "退出",
                 JOptionPane.INFORMATION_MESSAGE);
