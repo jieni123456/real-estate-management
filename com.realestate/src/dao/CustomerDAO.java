@@ -1,6 +1,7 @@
 package dao;
 
 import model.Customer;
+import util.DataAccessException;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -12,10 +13,11 @@ import java.util.List;
 /**
  * 客户的数据访问。
  *
- * <p>对应需求报告阶段二的两项改动：
+ * <p>对应需求报告：
  * <ul>
  *   <li>G-013  返回强类型 {@link Customer}，不再返回 {@code Object[]}</li>
  *   <li>G-001  新增走纯 INSERT，ID 冲突即失败，<b>不再静默覆盖</b>已有记录</li>
+ *   <li>G-012  SQL 异常不再被吞掉，改为抛出已归类的 {@link DataAccessException}</li>
  * </ul>
  *
  * <p>客户是单表写入，不涉及跨表事务（G-010 只影响房屋与房东的组合写入）。
@@ -41,9 +43,7 @@ public class CustomerDAO {
                 return rs.next();
             }
         } catch (SQLException e) {
-            System.err.println("校验客户ID是否已存在时出错: " + e.getMessage());
-            e.printStackTrace();
-            return false;
+            throw DataAccessException.from(e);
         }
     }
 
@@ -81,8 +81,7 @@ public class CustomerDAO {
 
         } catch (SQLException e) {
             System.err.println((update ? "更新" : "新增") + "客户失败: " + e.getMessage());
-            e.printStackTrace();
-            return false;
+            throw DataAccessException.from(e);
         }
     }
 
@@ -102,7 +101,7 @@ public class CustomerDAO {
             }
         } catch (SQLException e) {
             System.err.println("查询客户列表失败: " + e.getMessage());
-            e.printStackTrace();
+            throw DataAccessException.from(e);
         }
         return customers;
     }
@@ -117,8 +116,7 @@ public class CustomerDAO {
             return stmt.executeUpdate() > 0;
         } catch (SQLException e) {
             System.err.println("删除客户失败: " + e.getMessage());
-            e.printStackTrace();
+            throw DataAccessException.from(e);
         }
-        return false;
     }
 }

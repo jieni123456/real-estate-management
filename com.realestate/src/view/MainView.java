@@ -3,9 +3,11 @@ package view;
 import controller.AuthController;
 import controller.CustomerController;
 import controller.HouseController;
+import controller.LogController;
 import controller.StatsController;
 import util.Icons;
 import util.Permissions;
+import util.Result;
 import util.Session;
 import util.Theme;
 
@@ -14,15 +16,21 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.Icon;
 import javax.swing.JButton;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
+import javax.swing.SwingUtilities;
+import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
+import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.FontMetrics;
@@ -78,13 +86,14 @@ public class MainView extends JPanel {
     public MainView(AuthController authController,
                     HouseController houseController,
                     CustomerController customerController,
-                    StatsController statsController) {
+                    StatsController statsController,
+                    LogController logController) {
         this.authController = authController;
 
         setLayout(new BorderLayout());
 
         // 内容区：三个模块页面
-        overviewView = new OverviewView(statsController, this::setStatus);
+        overviewView = new OverviewView(statsController, logController, this::setStatus);
         houseView = new HouseView(houseController, this::setStatus);
         customerView = new CustomerView(customerController, this::setStatus);
         contentArea.add(overviewView, CARD_OVERVIEW);
@@ -125,6 +134,18 @@ public class MainView extends JPanel {
         userLabel.setFont(Theme.FONT_CAPTION);
         userLabel.setForeground(Theme.ACCENT_LIGHT);
 
+        JButton passwordButton = new JButton("修改密码");
+        passwordButton.setFont(Theme.FONT_CAPTION);
+        passwordButton.setForeground(Color.WHITE);
+        // 应用栏底色是主色，次按钮就做成描边而非实心，免得跟「退出登录」抢注意力
+        passwordButton.setContentAreaFilled(false);
+        passwordButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        passwordButton.setFocusPainted(false);
+        passwordButton.setBorder(new CompoundBorder(
+                new LineBorder(Theme.ACCENT_LIGHT, 1, true),
+                new EmptyBorder(4, 12, 4, 12)));
+        passwordButton.addActionListener(e -> showChangePasswordDialog());
+
         JButton logoutButton = new JButton("退出登录");
         logoutButton.setFont(Theme.FONT_CAPTION);
         logoutButton.setBackground(Theme.ACCENT_DARK);
@@ -135,6 +156,7 @@ public class MainView extends JPanel {
         logoutButton.addActionListener(e -> logout());
 
         right.add(userLabel);
+        right.add(passwordButton);
         right.add(logoutButton);
         bar.add(right, BorderLayout.EAST);
         return bar;
@@ -272,6 +294,121 @@ public class MainView extends JPanel {
         } else if (CARD_CUSTOMER.equals(cardName)) {
             customerView.refresh();
         }
+    }
+
+    // ------------------------------------------------------------ 修改密码
+
+    /**
+     * 修改当前登录用户的密码（G-015）。
+     *
+     * <p>只改自己的密码，因此不需要权限控制——两个角色都能用。
+     * 修改成功后停留在当前登录状态，不强制重新登录，避免打断手上正在做的事。
+     */
+    private void showChangePasswordDialog() {
+        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this),
+                "修改密码", Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setLayout(new BorderLayout());
+
+        JLabel title = new JLabel("修改密码");
+        title.setFont(Theme.FONT_TITLE);
+        title.setForeground(Theme.TEXT_HEADING);
+        title.setBorder(new EmptyBorder(18, 20, 0, 20));
+        dialog.add(title, BorderLayout.NORTH);
+
+        JPasswordField oldPassword = new JPasswordField();
+        JPasswordField newPassword = new JPasswordField();
+        JPasswordField confirmPassword = new JPasswordField();
+
+        JPanel body = new JPanel();
+        body.setOpaque(false);
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        body.setBorder(new EmptyBorder(16, 20, 0, 20));
+        body.add(captionLabel("当前账号：" + Session.currentUsername()));
+        body.add(Box.createVerticalStrut(10));
+        body.add(passwordRow("原密码", oldPassword));
+        body.add(passwordRow("新密码", newPassword));
+        body.add(passwordRow("确认新密码", confirmPassword));
+        body.add(Box.createVerticalStrut(2));
+        body.add(captionLabel("新密码 6–20 位，且不能包含空格"));
+        dialog.add(body, BorderLayout.CENTER);
+
+        JButton cancel = secondaryButton("取消");
+        cancel.addActionListener(e -> dialog.dispose());
+
+        JButton submit = primaryButton("保存");
+        submit.addActionListener(e -> {
+            Result result = authController.changePassword(
+                    new String(oldPassword.getPassword()),
+                    new String(newPassword.getPassword()),
+                    new String(confirmPassword.getPassword()));
+
+            if (result.isSuccess()) {
+                Toast.success(this, result.getMessage());
+                dialog.dispose();
+            } else {
+                JOptionPane.showMessageDialog(dialog, result.getMessage(),
+                        "无法修改", JOptionPane.WARNING_MESSAGE);
+            }
+        });
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        actions.setOpaque(false);
+        actions.setBorder(new EmptyBorder(18, 20, 18, 20));
+        actions.add(cancel);
+        actions.add(submit);
+        dialog.add(actions, BorderLayout.SOUTH);
+
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        oldPassword.requestFocusInWindow();
+        dialog.setVisible(true);
+    }
+
+    private JPanel passwordRow(String label, JPasswordField field) {
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 6));
+        row.setOpaque(false);
+        row.setAlignmentX(LEFT_ALIGNMENT);
+
+        JLabel caption = captionLabel(label);
+        caption.setPreferredSize(new Dimension(80, 30));
+
+        field.setFont(Theme.FONT_BODY);
+        field.setPreferredSize(new Dimension(200, 30));
+
+        row.add(caption);
+        row.add(field);
+        return row;
+    }
+
+    private JLabel captionLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(Theme.FONT_CAPTION);
+        label.setForeground(Theme.TEXT_SECONDARY);
+        label.setAlignmentX(LEFT_ALIGNMENT);
+        return label;
+    }
+
+    private JButton primaryButton(String text) {
+        JButton button = new JButton(text);
+        button.setFont(Theme.FONT_BODY);
+        button.setBackground(Theme.ACCENT);
+        button.setForeground(Theme.TEXT_ON_ACCENT);
+        button.setBorder(new EmptyBorder(6, 16, 6, 16));
+        button.setFocusPainted(false);
+        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        return button;
+    }
+
+    private JButton secondaryButton(String text) {
+        JButton button = new JButton(text);
+        button.setFont(Theme.FONT_BODY);
+        button.setBackground(Theme.SURFACE);
+        button.setForeground(Theme.TEXT_PRIMARY);
+        button.setBorder(new CompoundBorder(new LineBorder(Theme.BORDER_INPUT, 1, true),
+                new EmptyBorder(5, 14, 5, 14)));
+        button.setFocusPainted(false);
+        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        return button;
     }
 
     private void logout() {

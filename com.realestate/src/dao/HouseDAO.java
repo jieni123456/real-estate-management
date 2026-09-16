@@ -2,6 +2,7 @@ package dao;
 
 import model.House;
 import model.Landlord;
+import util.DataAccessException;
 import util.SecurityUtil;
 
 import java.sql.Connection;
@@ -14,11 +15,13 @@ import java.util.List;
 /**
  * 房屋与房东的数据访问。
  *
- * <p>对应需求报告阶段二的三项改动：
+ * <p>对应需求报告：
  * <ul>
  *   <li>G-013  返回强类型 {@link House}，不再返回 {@code Object[]}</li>
  *   <li>G-001  新增走纯 INSERT，ID 冲突即失败，<b>不再静默覆盖</b>已有记录</li>
  *   <li>G-010  房东与房屋两条写入包在同一事务中，避免出现孤儿数据</li>
+ *   <li>G-012  SQL 异常不再被吞掉，改为抛出已归类的 {@link DataAccessException}，
+ *       由 Controller 转成用户能看懂的说明</li>
  * </ul>
  *
  * <p><b>房东信息的处理原则：INSERT IGNORE——不存在则创建，已存在则沿用原信息，
@@ -59,9 +62,7 @@ public class HouseDAO {
                 return rs.next();
             }
         } catch (SQLException e) {
-            System.err.println("校验房屋ID是否已存在时出错: " + e.getMessage());
-            e.printStackTrace();
-            return false;
+            throw DataAccessException.from(e);
         }
     }
 
@@ -75,9 +76,7 @@ public class HouseDAO {
                 return rs.next();
             }
         } catch (SQLException e) {
-            System.err.println("校验房东ID是否已存在时出错: " + e.getMessage());
-            e.printStackTrace();
-            return false;
+            throw DataAccessException.from(e);
         }
     }
 
@@ -133,8 +132,7 @@ public class HouseDAO {
         } catch (SQLException e) {
             rollbackQuietly(conn);
             System.err.println((update ? "更新" : "新增") + "房屋失败: " + e.getMessage());
-            e.printStackTrace();
-            return false;
+            throw DataAccessException.from(e);
         } finally {
             closeQuietly(conn);
         }
@@ -162,7 +160,7 @@ public class HouseDAO {
             }
         } catch (SQLException e) {
             System.err.println("查询房屋列表失败: " + e.getMessage());
-            e.printStackTrace();
+            throw DataAccessException.from(e);
         }
         return houses;
     }
@@ -183,7 +181,7 @@ public class HouseDAO {
             }
         } catch (SQLException e) {
             System.err.println("查询房东列表失败: " + e.getMessage());
-            e.printStackTrace();
+            throw DataAccessException.from(e);
         }
         return landlords;
     }
@@ -198,9 +196,8 @@ public class HouseDAO {
             return stmt.executeUpdate() > 0;
         } catch (SQLException e) {
             System.err.println("删除房屋失败: " + e.getMessage());
-            e.printStackTrace();
+            throw DataAccessException.from(e);
         }
-        return false;
     }
 
     // ------------------------------------------------------------ 事务辅助

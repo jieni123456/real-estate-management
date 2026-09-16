@@ -2,6 +2,8 @@ package view;
 
 import controller.CustomerController;
 import model.Customer;
+import util.CsvExporter;
+import util.DataAccessException;
 import util.Result;
 import util.SearchMatcher;
 import util.Theme;
@@ -12,6 +14,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -40,6 +43,9 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -114,10 +120,14 @@ public class CustomerView extends JPanel {
         JButton refreshButton = secondaryOutlineButton("刷新数据");
         refreshButton.addActionListener(e -> refresh());
 
+        JButton exportButton = secondaryOutlineButton("导出 CSV");
+        exportButton.addActionListener(e -> exportCsv());
+
         buttons.add(addButton);
         buttons.add(editButton);
         buttons.add(deleteButton);
         buttons.add(refreshButton);
+        buttons.add(exportButton);
 
         JPanel toolbar = new JPanel(new BorderLayout());
         toolbar.setOpaque(false);
@@ -209,9 +219,19 @@ public class CustomerView extends JPanel {
 
     // ------------------------------------------------------------ 数据加载
 
-    /** 重新读取并刷新表格，同时把记录数写入底部状态栏 */
+    /**
+     * 重新读取并刷新表格，同时把记录数写入底部状态栏。
+     *
+     * <p>读取失败在这里捕获并提示：空表格与「读不出来」必须区分开，
+     * 否则用户会以为数据丢了。对应需求报告 G-012。
+     */
     public void refresh() {
-        allCustomers = customerController.getAllCustomers();
+        try {
+            allCustomers = customerController.getAllCustomers();
+        } catch (DataAccessException e) {
+            allCustomers = new ArrayList<>();
+            showError(this, "读取失败", e.userMessage());
+        }
         applyFilter();
     }
 
@@ -431,6 +451,53 @@ public class CustomerView extends JPanel {
     /** 统一的失败提示（校验不通过、ID 冲突、保存失败等） */
     private void warn(Component parent, String message) {
         JOptionPane.showMessageDialog(parent, message, "无法保存", JOptionPane.WARNING_MESSAGE);
+    }
+
+    /**
+     * 读取类失败的提示。标题与「无法保存」刻意区分开，用户看标题就能判断是
+     * 自己填错了，还是系统读不到数据。对应需求报告 G-012。
+     */
+    private void showError(Component parent, String title, String message) {
+        JOptionPane.showMessageDialog(parent, message, title, JOptionPane.ERROR_MESSAGE);
+    }
+
+    /**
+     * 导出当前列表为 CSV（G-014）。
+     *
+     * <p>导出的是<b>当前筛选后的结果</b>，不是全量——用户在搜索框里筛出几条再点导出，
+     * 期待拿到的就是这几条。因此提示语里带上条数，避免误解。
+     */
+    private void exportCsv() {
+        if (visibleCustomers.isEmpty()) {
+            warn(this, "当前列表没有可导出的数据");
+            return;
+        }
+
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("导出客户列表");
+        chooser.setSelectedFile(new File("客户列表_" + CsvExporter.today() + ".csv"));
+
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+
+        List<String[]> rows = new ArrayList<>();
+        rows.add(COLUMNS.clone());
+        for (Customer customer : visibleCustomers) {
+            rows.add(new String[]{
+                    customer.getId(), customer.getName(),
+                    customer.getPhone(), customer.getRequirements()});
+        }
+
+        Path file = chooser.getSelectedFile().toPath();
+        try {
+            CsvExporter.write(file, rows);
+            customerController.recordExport(visibleCustomers.size(), file.getFileName().toString());
+            Toast.success(this, "已导出 " + visibleCustomers.size() + " 条到 " + file.getFileName());
+        } catch (IOException e) {
+            showError(this, "导出失败",
+                    "无法写入文件：" + e.getMessage() + "\n请确认该文件未被 Excel 打开。");
+        }
     }
 
     /** 两列排布的表单：每行两组「标签 + 输入框」 */

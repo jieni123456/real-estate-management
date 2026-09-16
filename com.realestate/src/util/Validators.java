@@ -69,4 +69,26 @@ public final class Validators {
         }
         return null;
     }
+
+    /**
+     * 密码：必填，长度 6–20 位，且不允许包含空白字符。
+     *
+     * <p>刻意不强制「必须含大小写与数字」这类复杂度要求：本系统的初始口令
+     * （admin123 / agent456）就不满足，强行要求会让用户改完密码就登不进来。
+     * 长度与无空白是下限保证。对应需求报告 G-015。
+     */
+    public static String password(String label, String value) {
+        if (value == null || value.isEmpty()) {
+            return label + "不能为空";
+        }
+        if (value.length() < 6 || value.length() > 20) {
+            return label + "长度应在 6 到 20 位之间";
+        }
+        for (int i = 0; i < value.length(); i++) {
+            if (Character.isWhitespace(value.charAt(i))) {
+                return label + "不能包含空格";
+            }
+        }
+        return null;
+    }
 }

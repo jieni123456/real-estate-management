@@ -123,8 +123,10 @@ public class DatabaseUtil {
         try {
             return DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
         } catch (SQLException e) {
+            // 刻意不在这里弹模态框：连接失败的原因会被 DAO 归类为 DataAccessException，
+            // 再由界面层转成用户能看懂的一句话（见需求报告 G-012）。
+            // 顺带也避免了无头环境下弹框把线程卡住。
             System.err.println("数据库连接失败: " + e.getMessage());
-            showErrorDialog("数据库连接失败: " + e.getMessage());
             throw e;
         }
     }
@@ -165,6 +167,18 @@ public class DatabaseUtil {
                     "name VARCHAR(100) NOT NULL, " +
                     "phone VARCHAR(20) NOT NULL, " +
                     "requirements TEXT)");
+
+            // 创建操作日志表（G-017）。
+            // created_at 用数据库端默认值，取服务器时间，比客户端时间更可信。
+            stmt.execute("CREATE TABLE IF NOT EXISTS operation_logs (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "operator VARCHAR(50) NOT NULL DEFAULT '', " +
+                    "role VARCHAR(20) NOT NULL DEFAULT '', " +
+                    "action VARCHAR(30) NOT NULL DEFAULT '', " +
+                    "target VARCHAR(100) NOT NULL DEFAULT '', " +
+                    "detail VARCHAR(255) NOT NULL DEFAULT '', " +
+                    "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+                    "INDEX idx_operation_logs_created_at (created_at))");
 
             // 添加默认用户
             String adminPass = SecurityUtil.encryptPassword("admin123");

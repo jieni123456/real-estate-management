@@ -2,6 +2,8 @@ package controller;
 
 import model.Customer;
 import service.CustomerService;
+import service.LogService;
+import util.DataAccessException;
 import util.Permissions;
 import util.Result;
 import util.Session;
@@ -9,9 +11,21 @@ import util.Validators;
 
 import java.util.List;
 
+/**
+ * 客户相关的业务入口。
+ *
+ * <p>对应需求报告：
+ * <ul>
+ *   <li>G-001  新增走纯 INSERT，ID 冲突明确报错，绝不覆盖原记录</li>
+ *   <li>G-002  提供编辑入口（客户 ID 为主键，不可修改）</li>
+ *   <li>G-012  数据库异常转成用户能看懂的说明</li>
+ *   <li>G-017  新增 / 编辑 / 删除 / 导出写操作日志</li>
+ * </ul>
+ */
 public class CustomerController {
 
     private final CustomerService customerService = new CustomerService();
+    private final LogService logService = new LogService();
 
     // ---------------------------------------------------------------- 新增
 
@@ -28,15 +42,22 @@ public class CustomerController {
             return Result.fail(invalid);
         }
 
-        if (customerService.existsCustomer(customer.getId())) {
-            return Result.fail("客户ID「" + customer.getId() + "」已存在。请换一个ID，"
-                    + "或选中该客户后用「编辑客户」修改它。");
-        }
+        try {
+            if (customerService.existsCustomer(customer.getId())) {
+                return Result.fail("客户ID「" + customer.getId() + "」已存在。请换一个ID，"
+                        + "或选中该客户后用「编辑客户」修改它。");
+            }
 
-        if (!customerService.insertCustomer(customer)) {
-            return Result.fail("保存失败，请检查数据库连接后重试。");
+            if (!customerService.insertCustomer(customer)) {
+                return Result.fail("保存失败：记录未写入。");
+            }
+
+            logService.record("新增客户", customer.getId(), customer.getName());
+            return Result.ok("客户添加成功");
+
+        } catch (DataAccessException e) {
+            return Result.fail(describe(e, "客户"));
         }
-        return Result.ok("客户添加成功");
     }
 
     // ---------------------------------------------------------------- 编辑
@@ -50,14 +71,21 @@ public class CustomerController {
             return Result.fail(invalid);
         }
 
-        if (!customerService.existsCustomer(customer.getId())) {
-            return Result.fail("客户「" + customer.getId() + "」已不存在，可能已被其他人删除。");
-        }
+        try {
+            if (!customerService.existsCustomer(customer.getId())) {
+                return Result.fail("客户「" + customer.getId() + "」已不存在，可能已被其他人删除。");
+            }
 
-        if (!customerService.updateCustomer(customer)) {
-            return Result.fail("保存失败，请检查数据库连接后重试。");
+            if (!customerService.updateCustomer(customer)) {
+                return Result.fail("保存失败：记录未更新。");
+            }
+
+            logService.record("编辑客户", customer.getId(), customer.getName());
+            return Result.ok("客户已更新");
+
+        } catch (DataAccessException e) {
+            return Result.fail(describe(e, "客户"));
         }
-        return Result.ok("客户已更新");
     }
 
     // ---------------------------------------------------------------- 删除
@@ -70,18 +98,28 @@ public class CustomerController {
     public Result deleteCustomer(String customerId) {
         if (!Session.can(Permissions.CUSTOMER_DELETE)) {
             System.err.println("[权限不足] " + Session.currentUserLabel() + " 尝试删除客户，已拦截");
-            // 不在此处弹窗——界面层会把 Result 的说明展示出来，两处都弹会重复提示
             return Result.fail("权限不足：当前账号（" + Session.currentRoleName()
                     + "）没有删除客户的权限。");
         }
 
-        return customerService.deleteCustomer(customerId)
-                ? Result.ok("客户删除成功")
-                : Result.fail("删除失败，请检查数据库连接后重试。");
+        try {
+            if (!customerService.deleteCustomer(customerId)) {
+                return Result.fail("删除失败：该客户已不存在。");
+            }
+            logService.record("删除客户", customerId, "");
+            return Result.ok("客户删除成功");
+
+        } catch (DataAccessException e) {
+            return Result.fail(describe(e, "客户"));
+        }
     }
 
     // ---------------------------------------------------------------- 查询
 
+    /**
+     * 全部客户。读取失败时不在控制器里吞掉异常——「空列表」与「数据库连不上」
+     * 必须区分开，由界面层捕获 {@link DataAccessException} 并提示。
+     */
     public List<Customer> getAllCustomers() {
         System.out.println("获取所有客户信息");
         return customerService.getAllCustomers();
@@ -90,6 +128,11 @@ public class CustomerController {
     /** 供界面层判断是否启用「删除客户」按钮 */
     public boolean canDelete() {
         return Session.can(Permissions.CUSTOMER_DELETE);
+    }
+
+    /** 记录一次导出（G-014 / G-017） */
+    public void recordExport(int count, String fileName) {
+        logService.record("导出客户", fileName, "共 " + count + " 条");
     }
 
     // ---------------------------------------------------------------- 内部
@@ -113,6 +156,14 @@ public class CustomerController {
             return error;
         }
         return Validators.optionalText("需求描述", customer.getRequirements(), 500);
+    }
+
+    /** 把数据访问异常转成给用户的一句话（G-012） */
+    private String describe(DataAccessException e, String subject) {
+        if (e.getKind() == DataAccessException.Kind.DUPLICATE_KEY) {
+            return "该" + subject + "ID 已存在，请换一个 ID。";
+        }
+        return e.userMessage();
     }
 
     private String trim(String value) {

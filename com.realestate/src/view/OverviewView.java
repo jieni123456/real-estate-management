@@ -1,7 +1,10 @@
 package view;
 
+import controller.LogController;
 import controller.StatsController;
+import model.OperationLog;
 import model.Overview;
+import util.DataAccessException;
 import util.Formats;
 import util.Theme;
 
@@ -9,6 +12,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
 import java.awt.BasicStroke;
@@ -36,7 +40,11 @@ import java.util.function.Consumer;
  */
 public class OverviewView extends JPanel {
 
+    /** 概览页展示最近几条操作（G-017） */
+    private static final int RECENT_LOG_LIMIT = 5;
+
     private final StatsController statsController;
+    private final LogController logController;
     private final Consumer<String> statusReporter;
 
     private final StatCard houseCard = new StatCard("房源总数", Theme.ACCENT);
@@ -45,9 +53,12 @@ public class OverviewView extends JPanel {
     private final StatCard areaCard = new StatCard("平均面积", new Color(0xD9, 0x81, 0x2F));
 
     private final DistributionPanel distribution = new DistributionPanel();
+    private final ActivityPanel activity = new ActivityPanel();
 
-    public OverviewView(StatsController statsController, Consumer<String> statusReporter) {
+    public OverviewView(StatsController statsController, LogController logController,
+                        Consumer<String> statusReporter) {
         this.statsController = statsController;
+        this.logController = logController;
         this.statusReporter = statusReporter;
 
         setLayout(new BorderLayout());
@@ -68,6 +79,8 @@ public class OverviewView extends JPanel {
         content.add(createCardRow());
         content.add(Box.createVerticalStrut(18));
         content.add(distribution);
+        content.add(Box.createVerticalStrut(18));
+        content.add(activity);
         return content;
     }
 
@@ -114,23 +127,44 @@ public class OverviewView extends JPanel {
 
     // ------------------------------------------------------------ 数据加载
 
-    /** 重新读取统计数据。切换到本页时由 MainView 调用 */
+    /**
+     * 重新读取统计数据与最近操作。切换到本页时由 MainView 调用。
+     *
+     * <p>读取失败时把卡片显示为占位符并提示，而不是让异常冒到事件分发线程上——
+     * 那样整个界面会直接卡死（对应需求报告 G-012）。最近操作属辅助信息，
+     * LogController 内部已把读取失败降级为空列表，不打扰用户。
+     */
     public void refresh() {
-        Overview data = statsController.loadOverview();
+        try {
+            Overview data = statsController.loadOverview();
 
-        houseCard.setValue(data.getHouseCount() + " 套");
-        customerCard.setValue(data.getCustomerCount() + " 位");
-        landlordCard.setValue(data.getLandlordCount() + " 位");
-        areaCard.setValue(data.getAverageArea() > 0
-                ? Formats.average(data.getAverageArea()) + " m²"
-                : "—");
+            houseCard.setValue(data.getHouseCount() + " 套");
+            customerCard.setValue(data.getCustomerCount() + " 位");
+            landlordCard.setValue(data.getLandlordCount() + " 位");
+            areaCard.setValue(data.getAverageArea() > 0
+                    ? Formats.average(data.getAverageArea()) + " m²"
+                    : "—");
 
-        distribution.setData(data.getTypeCounts());
+            distribution.setData(data.getTypeCounts());
 
-        if (statusReporter != null) {
-            statusReporter.accept("共 " + data.getHouseCount() + " 套房屋、"
-                    + data.getCustomerCount() + " 位客户");
+            if (statusReporter != null) {
+                statusReporter.accept("共 " + data.getHouseCount() + " 套房屋、"
+                        + data.getCustomerCount() + " 位客户");
+            }
+        } catch (DataAccessException e) {
+            houseCard.setValue("—");
+            customerCard.setValue("—");
+            landlordCard.setValue("—");
+            areaCard.setValue("—");
+            distribution.setData(List.of());
+            if (statusReporter != null) {
+                statusReporter.accept("统计数据读取失败");
+            }
+            JOptionPane.showMessageDialog(this, e.userMessage(),
+                    "读取失败", JOptionPane.ERROR_MESSAGE);
         }
+
+        activity.setData(logController.getRecent(RECENT_LOG_LIMIT));
     }
 
     // ------------------------------------------------------------ 指标卡
@@ -307,6 +341,99 @@ public class OverviewView extends JPanel {
         }
 
         /** 户型名过长时截断加省略号，避免压到右侧条形 */
+        private String fit(Graphics2D g2, String text, int maxWidth) {
+            if (text == null) {
+                return "";
+            }
+            if (g2.getFontMetrics().stringWidth(text) <= maxWidth) {
+                return text;
+            }
+            int end = text.length();
+            while (end > 0 && g2.getFontMetrics().stringWidth(text.substring(0, end) + "…") > maxWidth) {
+                end--;
+            }
+            return text.substring(0, end) + "…";
+        }
+    }
+
+    // ------------------------------------------------------------ 最近操作
+
+    /**
+     * 最近操作列表（G-017）。
+     *
+     * <p>日志若只写进数据库而无人查看，等于没做。这里把它做成「看得见」的一块，
+     * 样式与户型分布卡保持一致。
+     */
+    private static final class ActivityPanel extends JPanel {
+
+        private static final int HEADER_H = 44;
+        private static final int ROW_H = 28;
+        private static final int PADDING = 18;
+
+        private List<OperationLog> data = List.of();
+
+        private ActivityPanel() {
+            setOpaque(false);
+            setAlignmentX(LEFT_ALIGNMENT);
+            updateHeight();
+        }
+
+        private void setData(List<OperationLog> data) {
+            this.data = data == null ? List.of() : data;
+            updateHeight();
+        }
+
+        /** 高度随行数变化；在 BoxLayout 中必须同时限制最大高度，否则会被拉满 */
+        private void updateHeight() {
+            int rows = Math.max(1, data.size());
+            int height = HEADER_H + rows * ROW_H + 14;
+            setPreferredSize(new Dimension(400, height));
+            setMinimumSize(new Dimension(240, height));
+            setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
+            revalidate();
+            repaint();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            try {
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+
+                g2.setColor(Theme.SURFACE);
+                g2.fill(new RoundRectangle2D.Double(0, 0, getWidth() - 1, getHeight() - 1, 12, 12));
+                g2.setColor(Theme.BORDER);
+                g2.setStroke(new BasicStroke(1f));
+                g2.draw(new RoundRectangle2D.Double(0.5, 0.5, getWidth() - 2, getHeight() - 2, 12, 12));
+
+                g2.setFont(Theme.FONT_SUBTITLE);
+                g2.setColor(Theme.TEXT_HEADING);
+                g2.drawString("最近操作", PADDING, 27);
+
+                if (data.isEmpty()) {
+                    g2.setFont(Theme.FONT_CAPTION);
+                    g2.setColor(Theme.TEXT_SECONDARY);
+                    g2.drawString("暂无操作记录", PADDING, HEADER_H + 14);
+                    return;
+                }
+
+                g2.setFont(Theme.FONT_BODY);
+                g2.setColor(Theme.TEXT_PRIMARY);
+                FontMetrics metrics = g2.getFontMetrics();
+                int maxWidth = getWidth() - PADDING * 2;
+
+                for (int i = 0; i < data.size(); i++) {
+                    int baseline = HEADER_H + i * ROW_H
+                            + (ROW_H + metrics.getAscent() - metrics.getDescent()) / 2;
+                    g2.drawString(fit(g2, data.get(i).toLine(), maxWidth), PADDING, baseline);
+                }
+            } finally {
+                g2.dispose();
+            }
+        }
+
+        /** 内容过长时截断加省略号，避免画到卡片外面去 */
         private String fit(Graphics2D g2, String text, int maxWidth) {
             if (text == null) {
                 return "";

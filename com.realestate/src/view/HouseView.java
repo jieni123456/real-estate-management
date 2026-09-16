@@ -3,6 +3,8 @@ package view;
 import controller.HouseController;
 import model.House;
 import model.Landlord;
+import util.CsvExporter;
+import util.DataAccessException;
 import util.Formats;
 import util.Result;
 import util.SearchMatcher;
@@ -17,6 +19,7 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JOptionPane;
@@ -47,6 +50,9 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -132,6 +138,9 @@ public class HouseView extends JPanel {
         JButton refreshButton = secondaryOutlineButton("刷新数据");
         refreshButton.addActionListener(e -> refresh());
 
+        JButton exportButton = secondaryOutlineButton("导出 CSV");
+        exportButton.addActionListener(e -> exportCsv());
+
         // 编辑与刷新同为次要操作，用同一套描边样式
         styleAsSecondary(editButton);
 
@@ -139,6 +148,7 @@ public class HouseView extends JPanel {
         buttons.add(editButton);
         buttons.add(deleteButton);
         buttons.add(refreshButton);
+        buttons.add(exportButton);
 
         JPanel toolbar = new JPanel(new BorderLayout());
         toolbar.setOpaque(false);
@@ -241,9 +251,19 @@ public class HouseView extends JPanel {
 
     // ------------------------------------------------------------ 数据加载
 
-    /** 重新读取并刷新表格，同时把记录数写入底部状态栏 */
+    /**
+     * 重新读取并刷新表格，同时把记录数写入底部状态栏。
+     *
+     * <p>读取失败（数据库连不上等）在这里捕获并提示：空表格与「读不出来」必须
+     * 区分开，否则用户会以为数据丢了。对应需求报告 G-012。
+     */
     public void refresh() {
-        allHouses = houseController.getAllHouses();
+        try {
+            allHouses = houseController.getAllHouses();
+        } catch (DataAccessException e) {
+            allHouses = new ArrayList<>();
+            showError(this, "读取失败", e.userMessage());
+        }
         applyFilter();
     }
 
@@ -402,6 +422,16 @@ public class HouseView extends JPanel {
     private void showHouseDialog(House existing) {
         final boolean editing = existing != null;
 
+        // 房东下拉的数据来源。读不出来就不必往下走了——给一个只剩「新建房东」的
+        // 残缺表单，用户填完照样存不进去。对应需求报告 G-012。
+        List<Landlord> landlords;
+        try {
+            landlords = houseController.getAllLandlords();
+        } catch (DataAccessException e) {
+            showError(this, "读取失败", e.userMessage());
+            return;
+        }
+
         JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this),
                 editing ? "编辑房屋" : "添加新房屋", Dialog.ModalityType.APPLICATION_MODAL);
         dialog.setLayout(new BorderLayout());
@@ -429,7 +459,7 @@ public class HouseView extends JPanel {
             houseId.setToolTipText("房屋ID 是主键，编辑时不可修改");
         }
 
-        JComboBox<Object> landlordBox = createLandlordBox(existing,
+        JComboBox<Object> landlordBox = createLandlordBox(existing, landlords,
                 landlordId, landlordName, landlordContact);
 
         JPanel body = new JPanel();
@@ -503,7 +533,7 @@ public class HouseView extends JPanel {
      * 一个房东可能关联多套房屋——凭一次表单提交改写房东资料，会连带改变其它房屋
      * 显示出来的房东信息。要改房东资料，应当有独立的房东管理（见缺口 G-007 的后续）。
      */
-    private JComboBox<Object> createLandlordBox(House existing,
+    private JComboBox<Object> createLandlordBox(House existing, List<Landlord> landlords,
                                                 JTextField id, JTextField name, JTextField contact) {
         JComboBox<Object> box = new JComboBox<>();
         box.setFont(Theme.FONT_BODY);
@@ -512,7 +542,7 @@ public class HouseView extends JPanel {
         box.setToolTipText("选择已有房东，或选「新建房东」录入新房东");
 
         box.addItem(NEW_LANDLORD_ITEM);
-        for (Landlord landlord : houseController.getAllLandlords()) {
+        for (Landlord landlord : landlords) {
             box.addItem(landlord);
         }
 
@@ -576,6 +606,55 @@ public class HouseView extends JPanel {
     /** 统一的失败提示（校验不通过、ID 冲突、保存失败等） */
     private void warn(Component parent, String message) {
         JOptionPane.showMessageDialog(parent, message, "无法保存", JOptionPane.WARNING_MESSAGE);
+    }
+
+    /**
+     * 读取类失败的提示。标题与「无法保存」刻意区分开——用户看标题就能判断是
+     * 自己填错了，还是系统读不到数据。对应需求报告 G-012。
+     */
+    private void showError(Component parent, String title, String message) {
+        JOptionPane.showMessageDialog(parent, message, title, JOptionPane.ERROR_MESSAGE);
+    }
+
+    /**
+     * 导出当前列表为 CSV（G-014）。
+     *
+     * <p>导出的是<b>当前筛选后的结果</b>，不是全量——用户在搜索框里筛出 3 条再点导出，
+     * 期待拿到的就是这 3 条。因此提示语里带上条数，避免误解。
+     */
+    private void exportCsv() {
+        if (visibleHouses.isEmpty()) {
+            warn(this, "当前列表没有可导出的数据");
+            return;
+        }
+
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("导出房屋列表");
+        chooser.setSelectedFile(new File("房屋列表_" + CsvExporter.today() + ".csv"));
+
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+
+        List<String[]> rows = new ArrayList<>();
+        rows.add(COLUMNS.clone());
+        for (House house : visibleHouses) {
+            rows.add(new String[]{
+                    house.getId(), house.getType(),
+                    Formats.area(house.getArea()), house.getAddress(),
+                    house.getLandlord().getId(), house.getLandlord().getName(),
+                    house.getLandlord().getContact()});
+        }
+
+        Path file = chooser.getSelectedFile().toPath();
+        try {
+            CsvExporter.write(file, rows);
+            houseController.recordExport(visibleHouses.size(), file.getFileName().toString());
+            Toast.success(this, "已导出 " + visibleHouses.size() + " 条到 " + file.getFileName());
+        } catch (IOException e) {
+            showError(this, "导出失败",
+                    "无法写入文件：" + e.getMessage() + "\n请确认该文件未被 Excel 打开。");
+        }
     }
 
     private JLabel groupLabel(String text) {
