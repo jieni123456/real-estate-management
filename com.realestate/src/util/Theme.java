@@ -77,6 +77,12 @@ public final class Theme {
      * 用正文级别的 15px 会显得单薄。
      */
     public static final Font FONT_BRAND = new Font(FONT_FAMILY, Font.BOLD, 20);
+    /**
+     * 概览页指标卡上的数字，22px 加粗。
+     * 与 FONT_BRAND 同属展示型例外——指标数字是概览页唯一需要「一眼看到」的内容，
+     * 用正文级别字号会让页面失去重心。
+     */
+    public static final Font FONT_METRIC = new Font(FONT_FAMILY, Font.BOLD, 22);
 
     // ---------------------------------------------------------------- 尺寸
 

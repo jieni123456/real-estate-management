@@ -105,6 +105,11 @@ public class HouseController {
         return houseService.getAllHouses();
     }
 
+    /** 房东列表，供「添加 / 编辑房屋」对话框的下拉选择使用（G-007） */
+    public List<Landlord> getAllLandlords() {
+        return houseService.getAllLandlords();
+    }
+
     /** 供界面层判断是否启用「删除房屋」按钮 */
     public boolean canDelete() {
         return Session.can(Permissions.HOUSE_DELETE);

@@ -42,6 +42,13 @@ public class HouseDAO {
                     + "FROM houses h JOIN landlords l ON h.landlord_id = l.id "
                     + "ORDER BY h.id";
 
+    /**
+     * 全部房东。供「添加 / 编辑房屋」对话框的下拉选择使用（G-007）。
+     * 联系方式存在加密列里，取出后解密。
+     */
+    private static final String SELECT_LANDLORDS_SQL =
+            "SELECT id, name, encrypted_contact FROM landlords ORDER BY id";
+
     /** 房屋 ID 是否已存在。供「新增 / 编辑」区分与冲突提示使用 */
     public boolean exists(String houseId) {
         String sql = "SELECT 1 FROM houses WHERE id = ?";
@@ -158,6 +165,27 @@ public class HouseDAO {
             e.printStackTrace();
         }
         return houses;
+    }
+
+    /** 全部房东列表，供房屋对话框的下拉选择使用（G-007） */
+    public List<Landlord> getAllLandlords() {
+        List<Landlord> landlords = new ArrayList<>();
+
+        try (Connection conn = DatabaseUtil.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(SELECT_LANDLORDS_SQL);
+             ResultSet rs = stmt.executeQuery()) {
+
+            while (rs.next()) {
+                landlords.add(new Landlord(
+                        rs.getString("id"),
+                        rs.getString("name"),
+                        SecurityUtil.decryptContact(rs.getString("encrypted_contact"))));
+            }
+        } catch (SQLException e) {
+            System.err.println("查询房东列表失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+        return landlords;
     }
 
     public boolean deleteHouse(String houseId) {

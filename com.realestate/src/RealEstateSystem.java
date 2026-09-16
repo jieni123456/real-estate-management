@@ -1,6 +1,7 @@
 import controller.AuthController;
 import controller.CustomerController;
 import controller.HouseController;
+import controller.StatsController;
 import dao.DatabaseUtil;
 import util.Theme;
 import view.LoginView;
@@ -21,6 +22,7 @@ public class RealEstateSystem {
         AuthController authController = new AuthController();
         HouseController houseController = new HouseController();
         CustomerController customerController = new CustomerController();
+        StatsController statsController = new StatsController();
 
         // 创建登录窗口
         JFrame loginFrame = new JFrame("登录");
@@ -35,7 +37,8 @@ public class RealEstateSystem {
         mainFrame.setLocationRelativeTo(null);
 
         // 创建主视图面板（不是 JFrame）
-        MainView mainView = new MainView(authController, houseController, customerController);
+        MainView mainView = new MainView(authController, houseController,
+                customerController, statsController);
         mainFrame.add(mainView);
         mainFrame.setVisible(false); // 初始不显示
 

@@ -3,6 +3,7 @@ package view;
 import controller.AuthController;
 import controller.CustomerController;
 import controller.HouseController;
+import controller.StatsController;
 import util.Icons;
 import util.Permissions;
 import util.Session;
@@ -48,6 +49,7 @@ import java.util.List;
  */
 public class MainView extends JPanel {
 
+    private static final String CARD_OVERVIEW = "overview";
     private static final String CARD_HOUSE = "house";
     private static final String CARD_CUSTOMER = "customer";
 
@@ -68,20 +70,24 @@ public class MainView extends JPanel {
 
     private final HouseView houseView;
     private final CustomerView customerView;
+    private final OverviewView overviewView;
 
     private Runnable onLogout;
     private boolean sidebarCollapsed;
 
     public MainView(AuthController authController,
                     HouseController houseController,
-                    CustomerController customerController) {
+                    CustomerController customerController,
+                    StatsController statsController) {
         this.authController = authController;
 
         setLayout(new BorderLayout());
 
-        // 内容区：两个模块页面
+        // 内容区：三个模块页面
+        overviewView = new OverviewView(statsController, this::setStatus);
         houseView = new HouseView(houseController, this::setStatus);
         customerView = new CustomerView(customerController, this::setStatus);
+        contentArea.add(overviewView, CARD_OVERVIEW);
         contentArea.add(houseView, CARD_HOUSE);
         contentArea.add(customerView, CARD_CUSTOMER);
         contentArea.setBackground(Theme.PAGE_BG);
@@ -162,8 +168,9 @@ public class MainView extends JPanel {
         sidebar.add(collapseButton);
         sidebar.add(Box.createVerticalStrut(8));
 
-        navItems.add(new NavItem("房屋管理", true, CARD_HOUSE, Permissions.HOUSE_VIEW));
-        navItems.add(new NavItem("客户管理", false, CARD_CUSTOMER, Permissions.CUSTOMER_VIEW));
+        navItems.add(new NavItem("系统概览", "dashboard", CARD_OVERVIEW, Permissions.HOUSE_VIEW));
+        navItems.add(new NavItem("房屋管理", "house", CARD_HOUSE, Permissions.HOUSE_VIEW));
+        navItems.add(new NavItem("客户管理", "person", CARD_CUSTOMER, Permissions.CUSTOMER_VIEW));
         for (NavItem item : navItems) {
             sidebar.add(item);
         }
@@ -258,7 +265,9 @@ public class MainView extends JPanel {
     }
 
     private void refreshCard(String cardName) {
-        if (CARD_HOUSE.equals(cardName)) {
+        if (CARD_OVERVIEW.equals(cardName)) {
+            overviewView.refresh();
+        } else if (CARD_HOUSE.equals(cardName)) {
             houseView.refresh();
         } else if (CARD_CUSTOMER.equals(cardName)) {
             customerView.refresh();
@@ -293,16 +302,16 @@ public class MainView extends JPanel {
     private final class NavItem extends JPanel {
 
         private final String title;
-        private final boolean houseIcon;
+        private final String iconName;
         private final String cardName;
         private final String permission;
 
         private boolean selected;
         private boolean hovered;
 
-        private NavItem(String title, boolean houseIcon, String cardName, String permission) {
+        private NavItem(String title, String iconName, String cardName, String permission) {
             this.title = title;
-            this.houseIcon = houseIcon;
+            this.iconName = iconName;
             this.cardName = cardName;
             this.permission = permission;
 
@@ -340,6 +349,18 @@ public class MainView extends JPanel {
             refreshCard(cardName);
         }
 
+        /** 侧边栏图标按名称取用。图标数目少，用 switch 比维护一份映射表更直观 */
+        private Icon iconFor(String name, Color color) {
+            switch (name) {
+                case "person":
+                    return Icons.person(color, Theme.ICON_SIZE);
+                case "dashboard":
+                    return Icons.dashboard(color, Theme.ICON_SIZE);
+                default:
+                    return Icons.house(color, Theme.ICON_SIZE);
+            }
+        }
+
         @Override
         protected void paintComponent(Graphics g) {
             Graphics2D g2 = (Graphics2D) g.create();
@@ -358,9 +379,7 @@ public class MainView extends JPanel {
                 }
 
                 Color foreground = selected ? Theme.ACCENT : Theme.TEXT_SECONDARY;
-                Icon icon = houseIcon
-                        ? Icons.house(foreground, Theme.ICON_SIZE)
-                        : Icons.person(foreground, Theme.ICON_SIZE);
+                Icon icon = iconFor(iconName, foreground);
 
                 int iconX = sidebarCollapsed ? (getWidth() - icon.getIconWidth()) / 2 : 14;
                 int iconY = (getHeight() - icon.getIconHeight()) / 2;

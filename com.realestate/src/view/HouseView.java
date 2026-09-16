@@ -2,29 +2,42 @@ package view;
 
 import controller.HouseController;
 import model.House;
+import model.Landlord;
+import util.Formats;
 import util.Result;
+import util.SearchMatcher;
 import util.Theme;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dialog;
 import java.awt.Dimension;
@@ -32,6 +45,8 @@ import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -41,15 +56,29 @@ public class HouseView extends JPanel {
     private static final String[] COLUMNS =
             {"ID", "户型", "面积(m²)", "地址", "房东ID", "房东姓名", "房东电话"};
 
+    /** 面积列的下标。它在模型里存 Double 而不是格式化后的字符串，见 createHouseTable */
+    private static final int AREA_COLUMN = 2;
+
+    /** 房东下拉中代表「新建房东」的哨兵项 */
+    private static final Object NEW_LANDLORD_ITEM = new Object() {
+        @Override
+        public String toString() {
+            return "＋ 新建房东";
+        }
+    };
+
     private final HouseController houseController;
     private final Consumer<String> statusReporter;
 
     private final JTable houseTable;
+    private final JTextField searchField = new JTextField(16);
     private final JButton editButton = new JButton("编辑房屋");
     private final JButton deleteButton = new JButton("删除房屋");
 
-    /** 与表格行一一对应的数据，避免再从表格单元格里反解字段 */
-    private List<House> currentHouses = new ArrayList<>();
+    /** 数据库中的全部房屋 */
+    private List<House> allHouses = new ArrayList<>();
+    /** 按搜索框筛选后、与表格行一一对应的数据 */
+    private List<House> visibleHouses = new ArrayList<>();
 
     public HouseView(HouseController houseController, Consumer<String> statusReporter) {
         this.houseController = houseController;
@@ -111,9 +140,57 @@ public class HouseView extends JPanel {
         buttons.add(deleteButton);
         buttons.add(refreshButton);
 
+        JPanel toolbar = new JPanel(new BorderLayout());
+        toolbar.setOpaque(false);
+        toolbar.add(buttons, BorderLayout.WEST);
+        toolbar.add(createSearchBox(), BorderLayout.EAST);
+
         top.add(title, BorderLayout.NORTH);
-        top.add(buttons, BorderLayout.SOUTH);
+        top.add(toolbar, BorderLayout.SOUTH);
         return top;
+    }
+
+    /**
+     * 关键字搜索框（G-004）。输入即筛选，按 Esc 清空。
+     *
+     * <p>筛选在已读出的数据上做，不再打数据库——本系统的数据量是「一个中介门店」级别，
+     * 全量加载后再过滤比每次输入都发一次 SQL 更简单也更快。
+     */
+    private JPanel createSearchBox() {
+        searchField.setFont(Theme.FONT_BODY);
+        searchField.setPreferredSize(new Dimension(220, 30));
+        searchField.putClientProperty("JTextField.placeholderText", "搜索 ID / 户型 / 地址 / 房东");
+        searchField.putClientProperty("JTextField.showClearButton", true);
+        searchField.setToolTipText("空格分隔多个关键字，需全部命中；按 Esc 清空");
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+        });
+        searchField.getInputMap(JComponent.WHEN_FOCUSED)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "clearSearch");
+        searchField.getActionMap().put("clearSearch", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                searchField.setText("");
+            }
+        });
+
+        JPanel box = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        box.setOpaque(false);
+        box.add(searchField);
+        return box;
     }
 
     private JTable createHouseTable() {
@@ -121,6 +198,16 @@ public class HouseView extends JPanel {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
+            }
+
+            /**
+             * 面积列声明为 Double，表头排序才会按数值比较（G-005）。
+             * 若沿用默认的 Object.class，排序器会退化成字符串比较，
+             * 「100」就被排在「89」前面了。
+             */
+            @Override
+            public Class<?> getColumnClass(int columnIndex) {
+                return columnIndex == AREA_COLUMN ? Double.class : String.class;
             }
         };
 
@@ -137,6 +224,11 @@ public class HouseView extends JPanel {
         table.setSelectionBackground(Theme.ACCENT);
         table.setSelectionForeground(Theme.TEXT_ON_ACCENT);
 
+        // G-005：点击表头排序。取值一律经 convertRowIndexToModel 换算，
+        // 因此排序之后「编辑 / 删除」拿到的仍是用户看到的那一行
+        table.setAutoCreateRowSorter(true);
+        table.getColumnModel().getColumn(AREA_COLUMN).setCellRenderer(new AreaCellRenderer());
+
         JTableHeader header = table.getTableHeader();
         header.setFont(Theme.FONT_TABLE_HEADER);
         header.setBackground(Theme.TABLE_HEADER_BG);
@@ -151,33 +243,58 @@ public class HouseView extends JPanel {
 
     /** 重新读取并刷新表格，同时把记录数写入底部状态栏 */
     public void refresh() {
-        currentHouses = houseController.getAllHouses();
+        allHouses = houseController.getAllHouses();
+        applyFilter();
+    }
 
+    /** 按搜索框内容过滤并重建表格（G-004）。不重新查库 */
+    private void applyFilter() {
+        String keyword = searchField.getText();
+
+        visibleHouses = new ArrayList<>();
+        for (House house : allHouses) {
+            if (SearchMatcher.matches(keyword,
+                    house.getId(), house.getType(), house.getAddress(),
+                    house.getLandlord().getId(), house.getLandlord().getName(),
+                    house.getLandlord().getContact())) {
+                visibleHouses.add(house);
+            }
+        }
+
+        rebuildTable();
+        reportStatus();
+    }
+
+    private void rebuildTable() {
         DefaultTableModel model = (DefaultTableModel) houseTable.getModel();
         model.setRowCount(0);
-        for (House house : currentHouses) {
+        for (House house : visibleHouses) {
             model.addRow(new Object[]{
                     house.getId(),
                     house.getType(),
-                    formatArea(house.getArea()),
+                    // 存原始数值，显示交给 AreaCellRenderer——这样排序才对
+                    house.getArea(),
                     house.getAddress(),
                     house.getLandlord().getId(),
                     house.getLandlord().getName(),
                     house.getLandlord().getContact()
             });
         }
-
-        if (statusReporter != null) {
-            statusReporter.accept("共 " + currentHouses.size() + " 条房屋记录");
-        }
     }
 
-    /** 128.0 显示为 128，89.5 保持 89.5 */
-    private String formatArea(double area) {
-        if (area == Math.rint(area) && !Double.isInfinite(area)) {
-            return String.valueOf((long) area);
+    private void reportStatus() {
+        if (statusReporter == null) {
+            return;
         }
-        return String.valueOf(area);
+
+        if (SearchMatcher.isBlank(searchField.getText())) {
+            statusReporter.accept("共 " + allHouses.size() + " 条房屋记录");
+        } else if (visibleHouses.isEmpty()) {
+            statusReporter.accept("未找到匹配的房屋（共 " + allHouses.size() + " 条）");
+        } else {
+            statusReporter.accept("筛选出 " + visibleHouses.size() + " 条 / 共 "
+                    + allHouses.size() + " 条房屋记录");
+        }
     }
 
     // ------------------------------------------------------------ 权限控制
@@ -253,8 +370,11 @@ public class HouseView extends JPanel {
     }
 
     /**
-     * 取当前选中的房屋。用 convertRowIndexToModel 换算行号，
-     * 这样将来开启表头排序（G-005）也不会取错行。
+     * 取当前选中的房屋。
+     *
+     * <p>用 {@code convertRowIndexToModel} 换算行号是必须的：开启表头排序（G-005）后
+     * 视图行号与模型行号不再一致，直接用 {@code getSelectedRow()} 去索引
+     * {@code visibleHouses} 会取到另一条记录——「删除」尤其危险，会删错行。
      */
     private House getSelectedHouse(String action) {
         int viewRow = houseTable.getSelectedRow();
@@ -264,12 +384,12 @@ public class HouseView extends JPanel {
         }
 
         int modelRow = houseTable.convertRowIndexToModel(viewRow);
-        if (modelRow < 0 || modelRow >= currentHouses.size()) {
+        if (modelRow < 0 || modelRow >= visibleHouses.size()) {
             warn(this, "数据已发生变化，请重新选择");
             refresh();
             return null;
         }
-        return currentHouses.get(modelRow);
+        return visibleHouses.get(modelRow);
     }
 
     // -------------------------------------------------------------- 新增 / 编辑对话框
@@ -294,12 +414,13 @@ public class HouseView extends JPanel {
 
         JTextField houseId = new JTextField(editing ? existing.getId() : "");
         JTextField type = new JTextField(editing ? existing.getType() : "");
-        JTextField area = new JTextField(editing ? formatArea(existing.getArea()) : "");
+        JTextField area = new JTextField(editing ? Formats.area(existing.getArea()) : "");
         JTextField address = new JTextField(editing ? existing.getAddress() : "");
-        JTextField landlordId = new JTextField(editing ? existing.getLandlord().getId() : "");
-        JTextField landlordName = new JTextField(editing ? existing.getLandlord().getName() : "");
-        JTextField landlordContact =
-                new JTextField(editing ? existing.getLandlord().getContact() : "");
+
+        // 房东三个字段的内容由下拉框决定：选中已有房东 → 填入并置只读；选「新建房东」→ 可填写
+        JTextField landlordId = new JTextField();
+        JTextField landlordName = new JTextField();
+        JTextField landlordContact = new JTextField();
 
         if (editing) {
             // 主键不可改：改主键等于换一条记录，语义上应是「删旧增新」
@@ -307,6 +428,9 @@ public class HouseView extends JPanel {
             houseId.setBackground(Theme.DISABLED_BG);
             houseId.setToolTipText("房屋ID 是主键，编辑时不可修改");
         }
+
+        JComboBox<Object> landlordBox = createLandlordBox(existing,
+                landlordId, landlordName, landlordContact);
 
         JPanel body = new JPanel();
         body.setOpaque(false);
@@ -319,6 +443,7 @@ public class HouseView extends JPanel {
                 new JTextField[]{houseId, type, area, address}));
         body.add(Box.createVerticalStrut(18));
         body.add(groupLabel("房东信息"));
+        body.add(labeledRow("房东", landlordBox));
         body.add(twoColumnForm(
                 new String[]{"房东ID", "姓名", "电话"},
                 new JTextField[]{landlordId, landlordName, landlordContact}));
@@ -368,10 +493,88 @@ public class HouseView extends JPanel {
         dialog.setVisible(true);
     }
 
+    /**
+     * 房东下拉框（G-007）。
+     *
+     * <p>改造前：房东 ID / 姓名 / 电话 三个自由输入框，同一个房东有两套房就得重复填两遍，
+     * 而且很容易填出「同一个房东 ID、两个不同姓名」的脏数据。
+     *
+     * <p>改造后：从已有房东里选，选中即自动填入其资料并置为只读。之所以只读，是因为
+     * 一个房东可能关联多套房屋——凭一次表单提交改写房东资料，会连带改变其它房屋
+     * 显示出来的房东信息。要改房东资料，应当有独立的房东管理（见缺口 G-007 的后续）。
+     */
+    private JComboBox<Object> createLandlordBox(House existing,
+                                                JTextField id, JTextField name, JTextField contact) {
+        JComboBox<Object> box = new JComboBox<>();
+        box.setFont(Theme.FONT_BODY);
+        box.setMaximumRowCount(12);
+        box.setRenderer(new LandlordRenderer());
+        box.setToolTipText("选择已有房东，或选「新建房东」录入新房东");
+
+        box.addItem(NEW_LANDLORD_ITEM);
+        for (Landlord landlord : houseController.getAllLandlords()) {
+            box.addItem(landlord);
+        }
+
+        box.addActionListener(e -> applyLandlordSelection(box, id, name, contact));
+
+        if (existing != null) {
+            selectLandlord(box, existing.getLandlord());
+        }
+        // 初始同步一次：新增时下拉停在「新建房东」，字段应清空且可编辑；
+        // 编辑时上面已选中对应房东，此处把其资料填好并置只读
+        applyLandlordSelection(box, id, name, contact);
+        return box;
+    }
+
+    /** 在房东下拉中选中指定房东；列表中不存在时（理论上不会发生）临时补入，避免显示为空 */
+    private void selectLandlord(JComboBox<Object> box, Landlord landlord) {
+        if (landlord == null) {
+            return;
+        }
+        for (int i = 0; i < box.getItemCount(); i++) {
+            Object item = box.getItemAt(i);
+            if (item instanceof Landlord && ((Landlord) item).getId().equals(landlord.getId())) {
+                box.setSelectedIndex(i);
+                return;
+            }
+        }
+        box.addItem(landlord);
+        box.setSelectedItem(landlord);
+    }
+
+    /** 下拉选择变化时同步下方字段 */
+    private void applyLandlordSelection(JComboBox<Object> box, JTextField id,
+                                        JTextField name, JTextField contact) {
+        Object selected = box.getSelectedItem();
+        boolean existing = selected instanceof Landlord;
+
+        if (existing) {
+            Landlord landlord = (Landlord) selected;
+            id.setText(landlord.getId());
+            name.setText(landlord.getName());
+            contact.setText(landlord.getContact());
+        } else {
+            id.setText("");
+            name.setText("");
+            contact.setText("");
+        }
+
+        setReadOnly(id, existing);
+        setReadOnly(name, existing);
+        setReadOnly(contact, existing);
+    }
+
+    private void setReadOnly(JTextField field, boolean readOnly) {
+        field.setEditable(!readOnly);
+        field.setBackground(readOnly ? Theme.DISABLED_BG : Theme.SURFACE);
+        field.setToolTipText(readOnly ? "已有房东的资料不可在此修改" : null);
+    }
+
     // ---------------------------------------------------------------- 小工具
 
     /** 统一的失败提示（校验不通过、ID 冲突、保存失败等） */
-    private void warn(java.awt.Component parent, String message) {
+    private void warn(Component parent, String message) {
         JOptionPane.showMessageDialog(parent, message, "无法保存", JOptionPane.WARNING_MESSAGE);
     }
 
@@ -388,7 +591,7 @@ public class HouseView extends JPanel {
     }
 
     /** 两列排布的表单：每行两组「标签 + 输入框」 */
-    private JPanel twoColumnForm(String[] labels, JTextField[] fields) {
+    private JPanel twoColumnForm(String[] labels, JComponent[] fields) {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setOpaque(false);
         panel.setAlignmentX(LEFT_ALIGNMENT);
@@ -406,7 +609,7 @@ public class HouseView extends JPanel {
             label.setFont(Theme.FONT_CAPTION);
             label.setForeground(Theme.TEXT_SECONDARY);
 
-            JTextField field = fields[i];
+            JComponent field = fields[i];
             field.setFont(Theme.FONT_BODY);
             field.setPreferredSize(new Dimension(190, 30));
 
@@ -422,6 +625,34 @@ public class HouseView extends JPanel {
             panel.add(field, gbc);
         }
         return panel;
+    }
+
+    /** 单行「标签 + 整宽控件」，用于放不进两列布局的控件（如下拉框）。列位置与 twoColumnForm 对齐 */
+    private JPanel labeledRow(String label, JComponent field) {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        row.setAlignmentX(LEFT_ALIGNMENT);
+        row.setBorder(new EmptyBorder(10, 0, 0, 0));
+
+        JLabel caption = new JLabel(label);
+        caption.setFont(Theme.FONT_CAPTION);
+        caption.setForeground(Theme.TEXT_SECONDARY);
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.weightx = 0;
+        gbc.insets = new Insets(0, 0, 10, 10);
+        row.add(caption, gbc);
+
+        gbc.gridx = 1;
+        gbc.weightx = 1;
+        gbc.insets = new Insets(0, 0, 10, 18);
+        row.add(field, gbc);
+        return row;
     }
 
     private CompoundBorder outlineBorder(Color color) {
@@ -451,5 +682,36 @@ public class HouseView extends JPanel {
         button.setBackground(Theme.SURFACE);
         button.setForeground(Theme.TEXT_PRIMARY);
         button.setBorder(outlineBorder(Theme.BORDER_INPUT));
+    }
+
+    /** 面积在模型里是 Double（为了排序），显示时去掉多余的 .0 */
+    private static final class AreaCellRenderer extends DefaultTableCellRenderer {
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                                                       boolean isSelected, boolean hasFocus,
+                                                       int row, int column) {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+            setText(value instanceof Number ? Formats.area(((Number) value).doubleValue()) : "");
+            return this;
+        }
+    }
+
+    /** 房东下拉的渲染：显示「ID · 姓名」，而不是 Landlord 的默认 toString */
+    private static final class LandlordRenderer extends DefaultListCellRenderer {
+
+        @Override
+        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                      boolean isSelected, boolean cellHasFocus) {
+            Object display = value;
+            if (value instanceof Landlord) {
+                Landlord landlord = (Landlord) value;
+                display = landlord.getId() + " · " + landlord.getName();
+            }
+            Component component = super.getListCellRendererComponent(
+                    list, display, index, isSelected, cellHasFocus);
+            component.setFont(Theme.FONT_BODY);
+            return component;
+        }
     }
 }

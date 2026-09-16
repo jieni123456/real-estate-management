@@ -2,6 +2,7 @@ package service;
 
 import dao.HouseDAO;
 import model.House;
+import model.Landlord;
 
 import java.util.List;
 
@@ -30,6 +31,12 @@ public class HouseService {
     public List<House> getAllHouses() {
         System.out.println("从DAO获取所有房屋");
         return houseDAO.getAllHouses();
+    }
+
+    /** 房东下拉的数据来源（G-007） */
+    public List<Landlord> getAllLandlords() {
+        System.out.println("从DAO获取所有房东");
+        return houseDAO.getAllLandlords();
     }
 
     public boolean deleteHouse(String houseId) {

@@ -9,6 +9,7 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
+import java.awt.geom.RoundRectangle2D;
 
 /**
  * 侧边栏图标。
@@ -25,12 +26,21 @@ public final class Icons {
 
     /** 房屋图标，用于「房屋管理」导航项 */
     public static Icon house(Color color, int size) {
-        return new NavIcon(color, size, true);
+        return new NavIcon(color, size, Kind.HOUSE);
     }
 
     /** 人物图标，用于「客户管理」导航项 */
     public static Icon person(Color color, int size) {
-        return new NavIcon(color, size, false);
+        return new NavIcon(color, size, Kind.PERSON);
+    }
+
+    /** 四方格图标，用于「系统概览」导航项 */
+    public static Icon dashboard(Color color, int size) {
+        return new NavIcon(color, size, Kind.DASHBOARD);
+    }
+
+    private enum Kind {
+        HOUSE, PERSON, DASHBOARD
     }
 
     /**
@@ -41,12 +51,12 @@ public final class Icons {
 
         private final Color color;
         private final int size;
-        private final boolean house;
+        private final Kind kind;
 
-        private NavIcon(Color color, int size, boolean house) {
+        private NavIcon(Color color, int size, Kind kind) {
             this.color = color;
             this.size = size;
-            this.house = house;
+            this.kind = kind;
         }
 
         @Override
@@ -73,10 +83,16 @@ public final class Icons {
                         BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 
                 double scale = size / 24.0;
-                if (house) {
-                    paintHouse(g2, scale);
-                } else {
-                    paintPerson(g2, scale);
+                switch (kind) {
+                    case HOUSE:
+                        paintHouse(g2, scale);
+                        break;
+                    case PERSON:
+                        paintPerson(g2, scale);
+                        break;
+                    default:
+                        paintDashboard(g2, scale);
+                        break;
                 }
             } finally {
                 g2.dispose();
@@ -105,6 +121,22 @@ public final class Icons {
             shoulders.moveTo(5.5 * s, 20 * s);
             shoulders.curveTo(5.5 * s, 14.2 * s, 18.5 * s, 14.2 * s, 18.5 * s, 20 * s);
             g2.draw(shoulders);
+        }
+
+        /** 四方格，象征「总览」。比画图表更简单，小尺寸下也更清晰 */
+        private void paintDashboard(Graphics2D g2, double s) {
+            double box = 6.4 * s;
+            double gap = 2.8 * s;
+            double origin = 4.2 * s;
+
+            for (int row = 0; row < 2; row++) {
+                for (int column = 0; column < 2; column++) {
+                    g2.draw(new RoundRectangle2D.Double(
+                            origin + column * (box + gap),
+                            origin + row * (box + gap),
+                            box, box, 2.0 * s, 2.0 * s));
+                }
+            }
         }
     }
 }

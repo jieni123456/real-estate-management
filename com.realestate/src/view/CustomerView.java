@@ -3,11 +3,14 @@ package view;
 import controller.CustomerController;
 import model.Customer;
 import util.Result;
+import util.SearchMatcher;
 import util.Theme;
 
+import javax.swing.AbstractAction;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -15,11 +18,14 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.JTableHeader;
 import java.awt.BorderLayout;
@@ -32,6 +38,8 @@ import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -44,11 +52,14 @@ public class CustomerView extends JPanel {
     private final Consumer<String> statusReporter;
 
     private final JTable customerTable;
+    private final JTextField searchField = new JTextField(16);
     private final JButton editButton = new JButton("编辑客户");
     private final JButton deleteButton = new JButton("删除客户");
 
-    /** 与表格行一一对应的数据，避免再从表格单元格里反解字段 */
-    private List<Customer> currentCustomers = new ArrayList<>();
+    /** 数据库中的全部客户 */
+    private List<Customer> allCustomers = new ArrayList<>();
+    /** 按搜索框筛选后、与表格行一一对应的数据 */
+    private List<Customer> visibleCustomers = new ArrayList<>();
 
     public CustomerView(CustomerController customerController, Consumer<String> statusReporter) {
         this.customerController = customerController;
@@ -108,9 +119,52 @@ public class CustomerView extends JPanel {
         buttons.add(deleteButton);
         buttons.add(refreshButton);
 
+        JPanel toolbar = new JPanel(new BorderLayout());
+        toolbar.setOpaque(false);
+        toolbar.add(buttons, BorderLayout.WEST);
+        toolbar.add(createSearchBox(), BorderLayout.EAST);
+
         top.add(title, BorderLayout.NORTH);
-        top.add(buttons, BorderLayout.SOUTH);
+        top.add(toolbar, BorderLayout.SOUTH);
         return top;
+    }
+
+    /** 关键字搜索框（G-004）。输入即筛选，按 Esc 清空 */
+    private JPanel createSearchBox() {
+        searchField.setFont(Theme.FONT_BODY);
+        searchField.setPreferredSize(new Dimension(220, 30));
+        searchField.putClientProperty("JTextField.placeholderText", "搜索 ID / 姓名 / 电话 / 需求");
+        searchField.putClientProperty("JTextField.showClearButton", true);
+        searchField.setToolTipText("空格分隔多个关键字，需全部命中；按 Esc 清空");
+        searchField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                applyFilter();
+            }
+        });
+        searchField.getInputMap(JComponent.WHEN_FOCUSED)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "clearSearch");
+        searchField.getActionMap().put("clearSearch", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                searchField.setText("");
+            }
+        });
+
+        JPanel box = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        box.setOpaque(false);
+        box.add(searchField);
+        return box;
     }
 
     private JTable createCustomerTable() {
@@ -118,6 +172,12 @@ public class CustomerView extends JPanel {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
+            }
+
+            /** 四列都是文本，声明为 String 让排序按字典序（G-005） */
+            @Override
+            public Class<?> getColumnClass(int columnIndex) {
+                return String.class;
             }
         };
 
@@ -134,6 +194,9 @@ public class CustomerView extends JPanel {
         table.setSelectionBackground(Theme.ACCENT);
         table.setSelectionForeground(Theme.TEXT_ON_ACCENT);
 
+        // G-005：点击表头排序
+        table.setAutoCreateRowSorter(true);
+
         JTableHeader header = table.getTableHeader();
         header.setFont(Theme.FONT_TABLE_HEADER);
         header.setBackground(Theme.TABLE_HEADER_BG);
@@ -148,11 +211,31 @@ public class CustomerView extends JPanel {
 
     /** 重新读取并刷新表格，同时把记录数写入底部状态栏 */
     public void refresh() {
-        currentCustomers = customerController.getAllCustomers();
+        allCustomers = customerController.getAllCustomers();
+        applyFilter();
+    }
 
+    /** 按搜索框内容过滤并重建表格（G-004）。不重新查库 */
+    private void applyFilter() {
+        String keyword = searchField.getText();
+
+        visibleCustomers = new ArrayList<>();
+        for (Customer customer : allCustomers) {
+            if (SearchMatcher.matches(keyword,
+                    customer.getId(), customer.getName(),
+                    customer.getPhone(), customer.getRequirements())) {
+                visibleCustomers.add(customer);
+            }
+        }
+
+        rebuildTable();
+        reportStatus();
+    }
+
+    private void rebuildTable() {
         DefaultTableModel model = (DefaultTableModel) customerTable.getModel();
         model.setRowCount(0);
-        for (Customer customer : currentCustomers) {
+        for (Customer customer : visibleCustomers) {
             model.addRow(new Object[]{
                     customer.getId(),
                     customer.getName(),
@@ -160,9 +243,20 @@ public class CustomerView extends JPanel {
                     customer.getRequirements()
             });
         }
+    }
 
-        if (statusReporter != null) {
-            statusReporter.accept("共 " + currentCustomers.size() + " 条客户记录");
+    private void reportStatus() {
+        if (statusReporter == null) {
+            return;
+        }
+
+        if (SearchMatcher.isBlank(searchField.getText())) {
+            statusReporter.accept("共 " + allCustomers.size() + " 条客户记录");
+        } else if (visibleCustomers.isEmpty()) {
+            statusReporter.accept("未找到匹配的客户（共 " + allCustomers.size() + " 条）");
+        } else {
+            statusReporter.accept("筛选出 " + visibleCustomers.size() + " 条 / 共 "
+                    + allCustomers.size() + " 条客户记录");
         }
     }
 
@@ -235,8 +329,11 @@ public class CustomerView extends JPanel {
     }
 
     /**
-     * 取当前选中的客户。用 convertRowIndexToModel 换算行号，
-     * 这样将来开启表头排序（G-005）也不会取错行。
+     * 取当前选中的客户。
+     *
+     * <p>用 {@code convertRowIndexToModel} 换算行号是必须的：开启表头排序（G-005）后
+     * 视图行号与模型行号不再一致，直接用 {@code getSelectedRow()} 索引
+     * {@code visibleCustomers} 会取到另一条记录。
      */
     private Customer getSelectedCustomer(String action) {
         int viewRow = customerTable.getSelectedRow();
@@ -246,12 +343,12 @@ public class CustomerView extends JPanel {
         }
 
         int modelRow = customerTable.convertRowIndexToModel(viewRow);
-        if (modelRow < 0 || modelRow >= currentCustomers.size()) {
+        if (modelRow < 0 || modelRow >= visibleCustomers.size()) {
             warn(this, "数据已发生变化，请重新选择");
             refresh();
             return null;
         }
-        return currentCustomers.get(modelRow);
+        return visibleCustomers.get(modelRow);
     }
 
     // -------------------------------------------------------------- 新增 / 编辑对话框
@@ -337,7 +434,7 @@ public class CustomerView extends JPanel {
     }
 
     /** 两列排布的表单：每行两组「标签 + 输入框」 */
-    private JPanel twoColumnForm(String[] labels, JTextField[] fields) {
+    private JPanel twoColumnForm(String[] labels, JComponent[] fields) {
         JPanel panel = new JPanel(new GridBagLayout());
         panel.setOpaque(false);
         panel.setAlignmentX(LEFT_ALIGNMENT);
@@ -354,7 +451,7 @@ public class CustomerView extends JPanel {
             label.setFont(Theme.FONT_CAPTION);
             label.setForeground(Theme.TEXT_SECONDARY);
 
-            JTextField field = fields[i];
+            JComponent field = fields[i];
             field.setFont(Theme.FONT_BODY);
             field.setPreferredSize(new Dimension(190, 30));
 
