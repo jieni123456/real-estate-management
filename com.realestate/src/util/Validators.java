@@ -71,6 +71,23 @@ public final class Validators {
     }
 
     /**
+     * 日期时间类：不能晚于今天（按日期判断，不看具体时刻）。
+     *
+     * <p>用于带看时间（G-008）。带看记录记的是「已经发生过的事」，
+     * 时间填成明天基本是年份打错。刻意按日期而非时刻判断——若按时刻比较，
+     * 用户想录「今天下午 3 点」而现在是上午 10 点就会被误拦。
+     */
+    public static String notFutureDate(String label, java.time.LocalDateTime value) {
+        if (value == null) {
+            return label + "不能为空";
+        }
+        if (value.toLocalDate().isAfter(java.time.LocalDate.now())) {
+            return label + "不能晚于今天";
+        }
+        return null;
+    }
+
+    /**
      * 密码：必填，长度 6–20 位，且不允许包含空白字符。
      *
      * <p>刻意不强制「必须含大小写与数字」这类复杂度要求：本系统的初始口令

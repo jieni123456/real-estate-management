@@ -32,6 +32,18 @@ public final class DisplayTest {
         t.equals("平均值为负时显示占位符", "—", Formats.average(-1));
         t.equals("平均值为 NaN 时显示占位符", "—", Formats.average(Double.NaN));
 
+        t.suite("Formats · 日期时间格式化（G-008）");
+
+        t.equals("标准格式 yyyy-MM-dd HH:mm",
+                "2026-09-16 14:30",
+                Formats.dateTime(java.time.LocalDateTime.of(2026, 9, 16, 14, 30)));
+        t.equals("个位数月日与时刻补零",
+                "2026-01-05 09:07",
+                Formats.dateTime(java.time.LocalDateTime.of(2026, 1, 5, 9, 7)));
+        t.equals("为 null 时返回空串（列表里不该出现 null 字样）",
+                "", Formats.dateTime(null));
+        t.equals("展示格式常量与用法一致", "yyyy-MM-dd HH:mm", Formats.DATE_TIME_PATTERN);
+
         t.suite("SearchMatcher · 关键字匹配（G-004）");
 
         t.check("null 关键字视为不过滤", SearchMatcher.matches(null, "任意内容"));

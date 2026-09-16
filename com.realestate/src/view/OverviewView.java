@@ -50,6 +50,7 @@ public class OverviewView extends JPanel {
     private final StatCard houseCard = new StatCard("房源总数", Theme.ACCENT);
     private final StatCard customerCard = new StatCard("客户总数", new Color(0x0E, 0x9A, 0x8A));
     private final StatCard landlordCard = new StatCard("房东总数", new Color(0x5A, 0x5A, 0xD6));
+    private final StatCard viewingCard = new StatCard("带看记录", new Color(0xC2, 0x47, 0x7D));
     private final StatCard areaCard = new StatCard("平均面积", new Color(0xD9, 0x81, 0x2F));
 
     private final DistributionPanel distribution = new DistributionPanel();
@@ -113,7 +114,7 @@ public class OverviewView extends JPanel {
     }
 
     private JPanel createCardRow() {
-        JPanel row = new JPanel(new GridLayout(1, 4, 14, 0));
+        JPanel row = new JPanel(new GridLayout(1, 5, 14, 0));
         row.setOpaque(false);
         row.setAlignmentX(LEFT_ALIGNMENT);
         row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 96));
@@ -121,6 +122,7 @@ public class OverviewView extends JPanel {
         row.add(houseCard);
         row.add(customerCard);
         row.add(landlordCard);
+        row.add(viewingCard);
         row.add(areaCard);
         return row;
     }
@@ -141,6 +143,7 @@ public class OverviewView extends JPanel {
             houseCard.setValue(data.getHouseCount() + " 套");
             customerCard.setValue(data.getCustomerCount() + " 位");
             landlordCard.setValue(data.getLandlordCount() + " 位");
+            viewingCard.setValue(data.getViewingCount() + " 次");
             areaCard.setValue(data.getAverageArea() > 0
                     ? Formats.average(data.getAverageArea()) + " m²"
                     : "—");
@@ -149,12 +152,14 @@ public class OverviewView extends JPanel {
 
             if (statusReporter != null) {
                 statusReporter.accept("共 " + data.getHouseCount() + " 套房屋、"
-                        + data.getCustomerCount() + " 位客户");
+                        + data.getCustomerCount() + " 位客户、"
+                        + data.getViewingCount() + " 条带看记录");
             }
         } catch (DataAccessException e) {
             houseCard.setValue("—");
             customerCard.setValue("—");
             landlordCard.setValue("—");
+            viewingCard.setValue("—");
             areaCard.setValue("—");
             distribution.setData(List.of());
             if (statusReporter != null) {

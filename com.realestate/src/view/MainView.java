@@ -5,6 +5,7 @@ import controller.CustomerController;
 import controller.HouseController;
 import controller.LogController;
 import controller.StatsController;
+import controller.ViewingController;
 import util.Icons;
 import util.Permissions;
 import util.Result;
@@ -60,6 +61,7 @@ public class MainView extends JPanel {
     private static final String CARD_OVERVIEW = "overview";
     private static final String CARD_HOUSE = "house";
     private static final String CARD_CUSTOMER = "customer";
+    private static final String CARD_VIEWING = "viewing";
 
     /** 侧边栏选中项的背景：主色的极淡版本，避免与表格选中行抢视觉 */
     private static final Color SELECTED_BG = new Color(0xE8, 0xF0, 0xFB);
@@ -78,6 +80,7 @@ public class MainView extends JPanel {
 
     private final HouseView houseView;
     private final CustomerView customerView;
+    private final ViewingView viewingView;
     private final OverviewView overviewView;
 
     private Runnable onLogout;
@@ -86,19 +89,22 @@ public class MainView extends JPanel {
     public MainView(AuthController authController,
                     HouseController houseController,
                     CustomerController customerController,
+                    ViewingController viewingController,
                     StatsController statsController,
                     LogController logController) {
         this.authController = authController;
 
         setLayout(new BorderLayout());
 
-        // 内容区：三个模块页面
+        // 内容区：四个模块页面
         overviewView = new OverviewView(statsController, logController, this::setStatus);
         houseView = new HouseView(houseController, this::setStatus);
         customerView = new CustomerView(customerController, this::setStatus);
+        viewingView = new ViewingView(viewingController, this::setStatus);
         contentArea.add(overviewView, CARD_OVERVIEW);
         contentArea.add(houseView, CARD_HOUSE);
         contentArea.add(customerView, CARD_CUSTOMER);
+        contentArea.add(viewingView, CARD_VIEWING);
         contentArea.setBackground(Theme.PAGE_BG);
 
         add(createAppBar(), BorderLayout.NORTH);
@@ -193,6 +199,7 @@ public class MainView extends JPanel {
         navItems.add(new NavItem("系统概览", "dashboard", CARD_OVERVIEW, Permissions.HOUSE_VIEW));
         navItems.add(new NavItem("房屋管理", "house", CARD_HOUSE, Permissions.HOUSE_VIEW));
         navItems.add(new NavItem("客户管理", "person", CARD_CUSTOMER, Permissions.CUSTOMER_VIEW));
+        navItems.add(new NavItem("带看记录", "calendar", CARD_VIEWING, Permissions.VIEWING_VIEW));
         for (NavItem item : navItems) {
             sidebar.add(item);
         }
@@ -265,6 +272,7 @@ public class MainView extends JPanel {
         // 漏掉这一步会导致：无论用哪个账号登录，删除按钮都一直是灰的。
         houseView.applyPermissions();
         customerView.applyPermissions();
+        viewingView.applyPermissions();
 
         NavItem firstAllowed = null;
         for (NavItem item : navItems) {
@@ -293,6 +301,8 @@ public class MainView extends JPanel {
             houseView.refresh();
         } else if (CARD_CUSTOMER.equals(cardName)) {
             customerView.refresh();
+        } else if (CARD_VIEWING.equals(cardName)) {
+            viewingView.refresh();
         }
     }
 
@@ -426,6 +436,7 @@ public class MainView extends JPanel {
         // Session 已清空，按钮权限同步复位为禁用，避免残留上一次登录的状态
         houseView.applyPermissions();
         customerView.applyPermissions();
+        viewingView.applyPermissions();
 
         JOptionPane.showMessageDialog(this, "您已成功退出系统", "退出",
                 JOptionPane.INFORMATION_MESSAGE);
@@ -493,6 +504,8 @@ public class MainView extends JPanel {
                     return Icons.person(color, Theme.ICON_SIZE);
                 case "dashboard":
                     return Icons.dashboard(color, Theme.ICON_SIZE);
+                case "calendar":
+                    return Icons.calendar(color, Theme.ICON_SIZE);
                 default:
                     return Icons.house(color, Theme.ICON_SIZE);
             }

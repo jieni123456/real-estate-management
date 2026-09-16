@@ -1,5 +1,8 @@
 package util;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+
 /**
  * 展示用的格式化工具。
  *
@@ -7,6 +10,11 @@ package util;
  * 原先只在 HouseView 内部实现，概览页出现后就需要用同一套规则）。
  */
 public final class Formats {
+
+    /** 日期时间的展示格式。带看记录的表格与对话框共用（G-008） */
+    public static final String DATE_TIME_PATTERN = "yyyy-MM-dd HH:mm";
+
+    private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern(DATE_TIME_PATTERN);
 
     private Formats() {
     }
@@ -34,5 +42,10 @@ public final class Formats {
             return "—";
         }
         return area(Math.round(value * 10) / 10.0);
+    }
+
+    /** 日期时间：2026-09-16 14:30。为 null 时返回空串，避免列表里出现 null 字样 */
+    public static String dateTime(LocalDateTime value) {
+        return value == null ? "" : value.format(DATE_TIME);
     }
 }

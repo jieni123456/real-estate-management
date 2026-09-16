@@ -39,8 +39,13 @@ public final class Icons {
         return new NavIcon(color, size, Kind.DASHBOARD);
     }
 
+    /** 日历图标，用于「带看记录」导航项 */
+    public static Icon calendar(Color color, int size) {
+        return new NavIcon(color, size, Kind.CALENDAR);
+    }
+
     private enum Kind {
-        HOUSE, PERSON, DASHBOARD
+        HOUSE, PERSON, DASHBOARD, CALENDAR
     }
 
     /**
@@ -90,6 +95,9 @@ public final class Icons {
                     case PERSON:
                         paintPerson(g2, scale);
                         break;
+                    case CALENDAR:
+                        paintCalendar(g2, scale);
+                        break;
                     default:
                         paintDashboard(g2, scale);
                         break;
@@ -137,6 +145,19 @@ public final class Icons {
                             box, box, 2.0 * s, 2.0 * s));
                 }
             }
+        }
+
+        /** 日历：外框 + 顶栏加粗 + 两个挂环，象征「带看记录」按时间发生 */
+        private void paintCalendar(Graphics2D g2, double s) {
+            // 外框。顶部留出挂环空间
+            g2.draw(new RoundRectangle2D.Double(4 * s, 6 * s, 16 * s, 14.5 * s, 2.5 * s, 2.5 * s));
+            // 顶栏分隔线
+            g2.draw(new java.awt.geom.Line2D.Double(4 * s, 10.5 * s, 20 * s, 10.5 * s));
+            // 两个挂环
+            g2.draw(new java.awt.geom.Line2D.Double(8.5 * s, 3.5 * s, 8.5 * s, 7.5 * s));
+            g2.draw(new java.awt.geom.Line2D.Double(15.5 * s, 3.5 * s, 15.5 * s, 7.5 * s));
+            // 一个日期点，避免整块看起来是空的
+            g2.fill(new RoundRectangle2D.Double(8 * s, 14 * s, 3 * s, 3 * s, 1 * s, 1 * s));
         }
     }
 }

@@ -365,10 +365,23 @@ public class HouseView extends JPanel {
             return;
         }
 
+        // 该房屋若有带看记录，外键会级联删除——必须提前讲清楚，
+        // 级联删除不能是隐形的（G-008）
+        String extra = "";
+        try {
+            int viewings = houseController.countViewings(selected.getId());
+            if (viewings > 0) {
+                extra = "\n\n注意：该房屋有 " + viewings + " 条带看记录，将一并删除。";
+            }
+        } catch (DataAccessException e) {
+            // 查不出条数就不提这一句；真正删除时若失败会有自己的提示
+            System.err.println("查询房屋带看记录条数失败: " + e.getMessage());
+        }
+
         Object[] options = {"取消", "确认删除"};
         int choice = JOptionPane.showOptionDialog(this,
                 "确定要删除房屋 " + selected.getId() + "（" + selected.getAddress()
-                        + "）吗？此操作不可撤销。",
+                        + "）吗？此操作不可撤销。" + extra,
                 "确认删除",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE,

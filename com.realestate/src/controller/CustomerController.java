@@ -3,6 +3,7 @@ package controller;
 import model.Customer;
 import service.CustomerService;
 import service.LogService;
+import service.ViewingService;
 import util.DataAccessException;
 import util.Permissions;
 import util.Result;
@@ -26,6 +27,7 @@ public class CustomerController {
 
     private final CustomerService customerService = new CustomerService();
     private final LogService logService = new LogService();
+    private final ViewingService viewingService = new ViewingService();
 
     // ---------------------------------------------------------------- 新增
 
@@ -133,6 +135,14 @@ public class CustomerController {
     /** 记录一次导出（G-014 / G-017） */
     public void recordExport(int count, String fileName) {
         logService.record("导出客户", fileName, "共 " + count + " 条");
+    }
+
+    /**
+     * 该客户关联的带看记录条数（G-008）。
+     * 删除客户时外键会级联删掉这些记录，界面需要先告诉用户会连带删掉多少。
+     */
+    public int countViewings(String customerId) {
+        return viewingService.countByCustomer(customerId);
     }
 
     // ---------------------------------------------------------------- 内部

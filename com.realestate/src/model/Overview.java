@@ -9,27 +9,31 @@ import java.util.List;
  * （houses / customers 只有业务字段），取不到真实值。与其用一个假的数据充数，
  * 这里改为展示「平均面积」与「户型分布」——同样能反映数据概况，且都可由现有字段算出。
  * 若日后确实需要「最近添加」，应给表加 created_at 列并另行登记为需求。
+ *
+ * <p>阶段五新增「带看次数」（G-008 落地后才有这张表）。
  */
 public class Overview {
 
     private final int houseCount;
     private final int customerCount;
     private final int landlordCount;
+    private final int viewingCount;
     private final double averageArea;
     private final List<TypeCount> typeCounts;
 
-    public Overview(int houseCount, int customerCount, int landlordCount,
+    public Overview(int houseCount, int customerCount, int landlordCount, int viewingCount,
                     double averageArea, List<TypeCount> typeCounts) {
         this.houseCount = houseCount;
         this.customerCount = customerCount;
         this.landlordCount = landlordCount;
+        this.viewingCount = viewingCount;
         this.averageArea = averageArea;
         this.typeCounts = typeCounts == null ? List.of() : typeCounts;
     }
 
     /** 数据库不可用或查询失败时的空统计，避免界面出现 null 判断 */
     public static Overview empty() {
-        return new Overview(0, 0, 0, 0, List.of());
+        return new Overview(0, 0, 0, 0, 0, List.of());
     }
 
     public int getHouseCount() {
@@ -42,6 +46,11 @@ public class Overview {
 
     public int getLandlordCount() {
         return landlordCount;
+    }
+
+    /** 带看记录总数（G-008） */
+    public int getViewingCount() {
+        return viewingCount;
     }
 
     public double getAverageArea() {

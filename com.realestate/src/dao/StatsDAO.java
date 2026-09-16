@@ -20,6 +20,7 @@ public class StatsDAO {
     private static final String COUNT_HOUSES = "SELECT COUNT(*) FROM houses";
     private static final String COUNT_CUSTOMERS = "SELECT COUNT(*) FROM customers";
     private static final String COUNT_LANDLORDS = "SELECT COUNT(*) FROM landlords";
+    private static final String COUNT_VIEWINGS = "SELECT COUNT(*) FROM viewings";
     private static final String AVERAGE_AREA = "SELECT AVG(area) FROM houses";
     private static final String TYPE_DISTRIBUTION =
             "SELECT type, COUNT(*) AS total FROM houses GROUP BY type ORDER BY total DESC, type";
@@ -30,10 +31,12 @@ public class StatsDAO {
             int houseCount = count(conn, COUNT_HOUSES);
             int customerCount = count(conn, COUNT_CUSTOMERS);
             int landlordCount = count(conn, COUNT_LANDLORDS);
+            int viewingCount = count(conn, COUNT_VIEWINGS);
             double averageArea = averageArea(conn);
             List<Overview.TypeCount> typeCounts = typeDistribution(conn);
 
-            return new Overview(houseCount, customerCount, landlordCount, averageArea, typeCounts);
+            return new Overview(houseCount, customerCount, landlordCount, viewingCount,
+                    averageArea, typeCounts);
 
         } catch (SQLException e) {
             System.err.println("统计查询失败: " + e.getMessage());

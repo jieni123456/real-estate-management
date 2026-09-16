@@ -4,6 +4,7 @@ import model.House;
 import model.Landlord;
 import service.HouseService;
 import service.LogService;
+import service.ViewingService;
 import util.DataAccessException;
 import util.Permissions;
 import util.Result;
@@ -31,6 +32,7 @@ public class HouseController {
 
     private final HouseService houseService = new HouseService();
     private final LogService logService = new LogService();
+    private final ViewingService viewingService = new ViewingService();
 
     // ---------------------------------------------------------------- 新增
 
@@ -162,6 +164,16 @@ public class HouseController {
     /** 记录一次导出（G-014 / G-017）。导出本身由界面层完成，这里只负责留痕 */
     public void recordExport(int count, String fileName) {
         logService.record("导出房屋", fileName, "共 " + count + " 条");
+    }
+
+    /**
+     * 该房屋关联的带看记录条数（G-008）。
+     *
+     * <p>删除房屋时外键会级联删掉这些记录，界面需要先告诉用户会连带删掉多少——
+     * 级联删除不能是隐形的。
+     */
+    public int countViewings(String houseId) {
+        return viewingService.countByHouse(houseId);
     }
 
     // ---------------------------------------------------------------- 内部

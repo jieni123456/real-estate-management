@@ -180,6 +180,24 @@ public class DatabaseUtil {
                     "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
                     "INDEX idx_operation_logs_created_at (created_at))");
 
+            // 创建带看记录表（G-008）。这是「客户 → 带看 → 成交」这条业务链的载体，
+            // 也是 customers 与 houses 两张表之间唯一的关联。
+            //
+            // 外键刻意用 ON DELETE CASCADE：房屋或客户被删除后，对应的带看记录已无意义。
+            // 但级联删除不能是隐形的——界面在删除确认框里会明确提示「将同时删除 N 条
+            // 带看记录」，让用户知道自己在删什么。
+            stmt.execute("CREATE TABLE IF NOT EXISTS viewings (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "customer_id VARCHAR(50) NOT NULL, " +
+                    "house_id VARCHAR(50) NOT NULL, " +
+                    "viewed_at DATETIME NOT NULL, " +
+                    "result VARCHAR(20) NOT NULL DEFAULT '意向中', " +
+                    "note VARCHAR(255) NOT NULL DEFAULT '', " +
+                    "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+                    "FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE, " +
+                    "FOREIGN KEY (house_id) REFERENCES houses(id) ON DELETE CASCADE, " +
+                    "INDEX idx_viewings_viewed_at (viewed_at))");
+
             // 添加默认用户
             String adminPass = SecurityUtil.encryptPassword("admin123");
             String agentPass = SecurityUtil.encryptPassword("agent456");

@@ -31,6 +31,7 @@ public final class AllTests {
         ValidatorsTest.run(runner);
         DisplayTest.run(runner);
         ExportTest.run(runner);
+        ViewingTest.run(runner);
 
         int failed = runner.report();
         System.exit(failed == 0 ? 0 : 1);

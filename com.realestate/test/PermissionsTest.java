@@ -19,23 +19,31 @@ public final class PermissionsTest {
     public static void run(TestRunner t) {
         t.suite("Permissions · 角色与权限映射");
 
-        t.equals("ADMIN 权限数量", 6, Permissions.of(Permissions.ROLE_ADMIN).size());
-        t.equals("AGENT 权限数量", 4, Permissions.of(Permissions.ROLE_AGENT).size());
+        t.equals("ADMIN 权限数量", 9, Permissions.of(Permissions.ROLE_ADMIN).size());
+        t.equals("AGENT 权限数量", 6, Permissions.of(Permissions.ROLE_AGENT).size());
 
         t.check("ADMIN 有删除房屋权限",
                 Permissions.of("ADMIN").contains(Permissions.HOUSE_DELETE));
         t.check("ADMIN 有删除客户权限",
                 Permissions.of("ADMIN").contains(Permissions.CUSTOMER_DELETE));
+        t.check("ADMIN 有删除带看权限",
+                Permissions.of("ADMIN").contains(Permissions.VIEWING_DELETE));
         t.check("AGENT 无删除房屋权限",
                 !Permissions.of("AGENT").contains(Permissions.HOUSE_DELETE));
         t.check("AGENT 无删除客户权限",
                 !Permissions.of("AGENT").contains(Permissions.CUSTOMER_DELETE));
+        t.check("AGENT 无删除带看权限",
+                !Permissions.of("AGENT").contains(Permissions.VIEWING_DELETE));
         t.check("AGENT 有新增房屋权限",
                 Permissions.of("AGENT").contains(Permissions.HOUSE_ADD));
         t.check("AGENT 有新增客户权限",
                 Permissions.of("AGENT").contains(Permissions.CUSTOMER_ADD));
+        t.check("AGENT 有登记带看权限",
+                Permissions.of("AGENT").contains(Permissions.VIEWING_ADD));
         t.check("AGENT 有查看房屋权限",
                 Permissions.of("AGENT").contains(Permissions.HOUSE_VIEW));
+        t.check("AGENT 有查看带看权限",
+                Permissions.of("AGENT").contains(Permissions.VIEWING_VIEW));
 
         t.check("角色名大小写不敏感", Permissions.of("admin").contains(Permissions.HOUSE_DELETE));
         t.check("角色名首尾空格被忽略",
@@ -66,6 +74,8 @@ public final class PermissionsTest {
         Session.login(new User("agent", "", Permissions.ROLE_AGENT));
         t.check("AGENT 登录后不能删除房屋", !Session.can(Permissions.HOUSE_DELETE));
         t.check("AGENT 登录后可以新增房屋", Session.can(Permissions.HOUSE_ADD));
+        t.check("AGENT 登录后可以登记带看", Session.can(Permissions.VIEWING_ADD));
+        t.check("AGENT 登录后不能删除带看", !Session.can(Permissions.VIEWING_DELETE));
         t.equals("AGENT 的顶栏文案", "agent · 经纪人", Session.currentUserLabel());
 
         Session.logout();

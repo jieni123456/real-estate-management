@@ -41,6 +41,24 @@ public final class ValidatorsTest {
         t.check("过短被拒", Validators.phone("电话", "1234") != null);
         t.check("过长被拒", Validators.phone("电话", "123456789012345678901") != null);
 
+        t.suite("Validators · 带看时间不得晚于今天（G-008）");
+
+        java.time.LocalDateTime yesterday =
+                java.time.LocalDate.now().minusDays(1).atTime(10, 0);
+        java.time.LocalDateTime todayNoon = java.time.LocalDate.now().atTime(12, 0);
+        java.time.LocalDateTime tomorrow =
+                java.time.LocalDate.now().plusDays(1).atTime(9, 0);
+
+        t.isNull("昨天通过", Validators.notFutureDate("带看时间", yesterday));
+        t.isNull("今天（即便是 23:59）也通过——按日期判断而非时刻，"
+                + "否则「今天下午 3 点」会被误拦",
+                Validators.notFutureDate("带看时间", java.time.LocalDate.now().atTime(23, 59)));
+        t.isNull("今天中午通过", Validators.notFutureDate("带看时间", todayNoon));
+        t.check("明天被拒", Validators.notFutureDate("带看时间", tomorrow) != null);
+        t.equals("明天被拒时给出原因",
+                "带看时间不能晚于今天", Validators.notFutureDate("带看时间", tomorrow));
+        t.equals("null 被拒", "带看时间不能为空", Validators.notFutureDate("带看时间", null));
+
         t.suite("Validators · 数量与密码");
 
         t.isNull("面积 0.1 通过", Validators.positiveNumber("面积", 0.1));
