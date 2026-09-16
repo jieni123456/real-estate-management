@@ -1,65 +1,107 @@
 package view;
 
-
 import controller.HouseController;
-import javax.swing.*;
+import util.Theme;
+
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JDialog;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTable;
+import javax.swing.JTextField;
+import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
+import javax.swing.border.CompoundBorder;
+import javax.swing.border.EmptyBorder;
+import javax.swing.border.LineBorder;
 import javax.swing.table.DefaultTableModel;
-import java.awt.*;
-        import java.awt.event.ActionEvent;
+import javax.swing.table.JTableHeader;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Cursor;
+import java.awt.Dialog;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.util.List;
+import java.util.function.Consumer;
 
 public class HouseView extends JPanel {
+
+    private static final String[] COLUMNS =
+            {"ID", "户型", "面积(m²)", "地址", "房东ID", "房东姓名", "房东电话"};
+
     private final HouseController houseController;
+    private final Consumer<String> statusReporter;
+
     private final JTable houseTable;
+    private final JButton deleteButton = new JButton("删除房屋");
 
-    public HouseView(HouseController houseController) {
+    public HouseView(HouseController houseController, Consumer<String> statusReporter) {
         this.houseController = houseController;
-        setLayout(new BorderLayout());
-        setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-        initializeUI();
+        this.statusReporter = statusReporter;
 
+        setLayout(new BorderLayout());
+        setBackground(Theme.PAGE_BG);
+        setBorder(new EmptyBorder(18, 18, 18, 18));
+
+        JPanel header = createHeader();
         houseTable = createHouseTable();
-        add(new JScrollPane(houseTable), BorderLayout.CENTER);
-        loadHouseData();
+
+        JScrollPane scrollPane = new JScrollPane(houseTable);
+        scrollPane.setBorder(new LineBorder(Theme.BORDER, 1, true));
+        scrollPane.getViewport().setBackground(Theme.SURFACE);
+
+        add(header, BorderLayout.NORTH);
+        add(scrollPane, BorderLayout.CENTER);
+
+        applyDeletePermission();
+        refresh();
     }
 
-    private void initializeUI() {
-        // 顶部面板
-        JPanel topPanel = new JPanel(new BorderLayout());
-        topPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+    // ------------------------------------------------------------ 顶部区域
 
-        // 标题
-        JLabel titleLabel = new JLabel("房屋信息管理", JLabel.CENTER);
-        titleLabel.setFont(new Font("微软雅黑", Font.BOLD, 20));
-        titleLabel.setForeground(new Color(25, 25, 112));
-        topPanel.add(titleLabel, BorderLayout.CENTER);
+    private JPanel createHeader() {
+        JPanel top = new JPanel(new BorderLayout());
+        top.setOpaque(false);
+        top.setBorder(new EmptyBorder(0, 0, 14, 0));
 
-        // 按钮面板
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 10));
+        JLabel title = new JLabel("房屋信息管理");
+        title.setFont(Theme.FONT_TITLE);
+        title.setForeground(Theme.TEXT_HEADING);
 
-        // 添加房屋按钮
-        JButton addButton = new JButton("添加房屋");
-        addButton.addActionListener(this::showAddHouseDialog);
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        buttons.setOpaque(false);
 
-        // 删除房屋按钮
-        JButton deleteButton = new JButton("删除房屋");
+        JButton addButton = primaryButton("添加房屋");
+        addButton.addActionListener(e -> showAddHouseDialog());
+
+        deleteButton.setFont(Theme.FONT_BODY);
+        deleteButton.setFocusPainted(false);
+        deleteButton.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         deleteButton.addActionListener(e -> deleteSelectedHouse());
 
-        // 刷新按钮
-        JButton refreshButton = new JButton("刷新数据");
-        refreshButton.addActionListener(e -> loadHouseData());
+        JButton refreshButton = secondaryOutlineButton("刷新数据");
+        refreshButton.addActionListener(e -> refresh());
 
-        buttonPanel.add(addButton);
-        buttonPanel.add(deleteButton);
-        buttonPanel.add(refreshButton);
+        buttons.add(addButton);
+        buttons.add(deleteButton);
+        buttons.add(refreshButton);
 
-        topPanel.add(buttonPanel, BorderLayout.SOUTH);
-        add(topPanel, BorderLayout.NORTH);
+        top.add(title, BorderLayout.NORTH);
+        top.add(buttons, BorderLayout.SOUTH);
+        return top;
     }
 
     private JTable createHouseTable() {
-        String[] columns = {"ID", "户型", "面积(m²)", "地址", "房东ID", "房东姓名", "房东电话"};
-        DefaultTableModel model = new DefaultTableModel(columns, 0) {
+        DefaultTableModel model = new DefaultTableModel(COLUMNS, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
                 return false;
@@ -67,14 +109,32 @@ public class HouseView extends JPanel {
         };
 
         JTable table = new JTable(model);
-        table.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-        table.setRowHeight(30);
+        table.setFont(Theme.FONT_BODY);
+        table.setRowHeight(Theme.TABLE_ROW_HEIGHT);
         table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.getTableHeader().setFont(new Font("微软雅黑", Font.BOLD, 14));
+        table.setShowVerticalLines(false);
+        table.setShowHorizontalLines(true);
+        table.setGridColor(Theme.BORDER_LIGHT);
+        table.setIntercellSpacing(new Dimension(0, 1));
+        table.setFillsViewportHeight(true);
+        table.setBackground(Theme.SURFACE);
+        table.setSelectionBackground(Theme.ACCENT);
+        table.setSelectionForeground(Theme.TEXT_ON_ACCENT);
+
+        JTableHeader header = table.getTableHeader();
+        header.setFont(Theme.FONT_TABLE_HEADER);
+        header.setBackground(Theme.TABLE_HEADER_BG);
+        header.setForeground(new Color(0x3C, 0x40, 0x43));
+        header.setReorderingAllowed(false);
+        Dimension headerSize = header.getPreferredSize();
+        header.setPreferredSize(new Dimension(headerSize.width, 38));
         return table;
     }
 
-    private void loadHouseData() {
+    // ------------------------------------------------------------ 数据加载
+
+    /** 重新读取并刷新表格，同时把记录数写入底部状态栏 */
+    public void refresh() {
         DefaultTableModel model = (DefaultTableModel) houseTable.getModel();
         model.setRowCount(0);
 
@@ -82,114 +142,240 @@ public class HouseView extends JPanel {
         for (Object[] house : houses) {
             model.addRow(house);
         }
+
+        if (statusReporter != null) {
+            statusReporter.accept("共 " + houses.size() + " 条房屋记录");
+        }
     }
 
-    private void showAddHouseDialog(ActionEvent e) {
-        // 创建对话框
-        JDialog dialog = new JDialog();
-        dialog.setTitle("添加新房屋");
-        dialog.setModal(true);
-        dialog.setSize(500, 450);
-        dialog.setLayout(new GridLayout(0, 2, 10, 10)); // 网格布局，每行两个组件
+    // ------------------------------------------------------------ 权限控制
 
-        // 表单字段
-        JLabel lblHouseId = new JLabel("房屋ID:");
-        JTextField txtHouseId = new JTextField(20);
-        JLabel lblType = new JLabel("户型:");
-        JTextField txtType = new JTextField(20);
-        JLabel lblArea = new JLabel("面积(m²):");
-        JTextField txtArea = new JTextField(20);
-        JLabel lblAddress = new JLabel("地址:");
-        JTextField txtAddress = new JTextField(20);
-        JLabel lblLandlordId = new JLabel("房东ID:");
-        JTextField txtLandlordId = new JTextField(20);
-        JLabel lblLandlordName = new JLabel("房东姓名:");
-        JTextField txtLandlordName = new JTextField(20);
-        JLabel lblLandlordContact = new JLabel("房东电话:");
-        JTextField txtLandlordContact = new JTextField(20);
+    /**
+     * 按当前用户权限启用或置灰「删除房屋」按钮。
+     *
+     * <p>界面层的置灰只是体验优化——真正的防护在 {@code HouseController.deleteHouse}。
+     *
+     * <p>这里显式指定禁用态的配色，而不依赖外观库的默认处理，
+     * 以确保「灰底灰字」与正常的「红字红边」对比足够鲜明，用户一眼能看出是权限不足。
+     */
+    private void applyDeletePermission() {
+        boolean allowed = houseController.canDelete();
+        deleteButton.setEnabled(allowed);
 
-        // 提交按钮
-        JButton btnSubmit = new JButton("提交");
-        btnSubmit.addActionListener(evt -> {
-            try {
-                // 获取输入的值
-                String houseId = txtHouseId.getText();
-                String type = txtType.getText();
-                double area = Double.parseDouble(txtArea.getText());
-                String address = txtAddress.getText();
-                String landlordId = txtLandlordId.getText();
-                String landlordName = txtLandlordName.getText();
-                String landlordContact = txtLandlordContact.getText();
-
-                // 调用控制器添加房屋
-                boolean success = houseController.addHouse(
-                        houseId, type, area, address,
-                        landlordId, landlordName, landlordContact
-                );
-
-                if (success) {
-                    JOptionPane.showMessageDialog(dialog, "房屋添加成功！", "成功", JOptionPane.INFORMATION_MESSAGE);
-                    loadHouseData(); // 刷新表格数据
-                    dialog.dispose(); // 关闭对话框
-                } else {
-                    JOptionPane.showMessageDialog(dialog, "房屋添加失败！", "错误", JOptionPane.ERROR_MESSAGE);
-                }
-            } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(dialog, "面积必须是数字！", "输入错误", JOptionPane.ERROR_MESSAGE);
-            }
-        });
-
-        // 取消按钮
-        JButton btnCancel = new JButton("取消");
-        btnCancel.addActionListener(evt -> dialog.dispose());
-
-        // 添加组件到对话框
-        dialog.add(lblHouseId);
-        dialog.add(txtHouseId);
-        dialog.add(lblType);
-        dialog.add(txtType);
-        dialog.add(lblArea);
-        dialog.add(txtArea);
-        dialog.add(lblAddress);
-        dialog.add(txtAddress);
-        dialog.add(lblLandlordId);
-        dialog.add(txtLandlordId);
-        dialog.add(lblLandlordName);
-        dialog.add(txtLandlordName);
-        dialog.add(lblLandlordContact);
-        dialog.add(txtLandlordContact);
-        dialog.add(btnSubmit);
-        dialog.add(btnCancel);
-
-        // 显示对话框
-        dialog.setLocationRelativeTo(null); // 居中显示
-        dialog.setVisible(true);
+        if (allowed) {
+            deleteButton.setForeground(Theme.DANGER);
+            deleteButton.setBackground(Theme.SURFACE);
+            deleteButton.setBorder(outlineBorder(Theme.DANGER));
+            deleteButton.setToolTipText(null);
+        } else {
+            deleteButton.setForeground(Theme.DISABLED_FG);
+            deleteButton.setBackground(Theme.DISABLED_BG);
+            deleteButton.setBorder(outlineBorder(Theme.DISABLED_BORDER));
+            deleteButton.setToolTipText("需要管理员权限");
+        }
+        deleteButton.repaint();
     }
+
+    // ------------------------------------------------------------ 删除逻辑
 
     private void deleteSelectedHouse() {
         int selectedRow = houseTable.getSelectedRow();
         if (selectedRow == -1) {
-            JOptionPane.showMessageDialog(this, "请先选择要删除的房屋", "提示", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(this, "请先选择要删除的房屋", "提示",
+                    JOptionPane.WARNING_MESSAGE);
             return;
         }
 
-        String houseId = (String) houseTable.getValueAt(selectedRow, 0);
-        String address = (String) houseTable.getValueAt(selectedRow, 3);
+        String houseId = String.valueOf(houseTable.getValueAt(selectedRow, 0));
+        String address = String.valueOf(houseTable.getValueAt(selectedRow, 3));
 
-        int confirm = JOptionPane.showConfirmDialog(
-                this,
-                "确定要删除房屋 " + houseId + " (" + address + ") 吗？",
+        Object[] options = {"取消", "确认删除"};
+        int choice = JOptionPane.showOptionDialog(this,
+                "确定要删除房屋 " + houseId + "（" + address + "）吗？此操作不可撤销。",
                 "确认删除",
-                JOptionPane.YES_NO_OPTION
-        );
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.WARNING_MESSAGE,
+                null,
+                options,
+                options[0]); // 默认焦点在「取消」，避免习惯性回车误删
 
-        if (confirm == JOptionPane.YES_OPTION) {
-            if (houseController.deleteHouse(houseId)) {
-                JOptionPane.showMessageDialog(this, "房屋删除成功!", "成功", JOptionPane.INFORMATION_MESSAGE);
-                loadHouseData();
-            } else {
-                JOptionPane.showMessageDialog(this, "删除房屋失败", "错误", JOptionPane.ERROR_MESSAGE);
-            }
+        if (choice != 1) {
+            return;
         }
+
+        if (houseController.deleteHouse(houseId)) {
+            Toast.success(this, "房屋删除成功");
+            refresh();
+        } else {
+            JOptionPane.showMessageDialog(this, "删除房屋失败", "错误",
+                    JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    // -------------------------------------------------------------- 添加对话框
+
+    private void showAddHouseDialog() {
+        JDialog dialog = new JDialog(SwingUtilities.getWindowAncestor(this), "添加新房屋",
+                Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setLayout(new BorderLayout());
+
+        JLabel title = new JLabel("添加新房屋");
+        title.setFont(Theme.FONT_TITLE);
+        title.setForeground(Theme.TEXT_HEADING);
+        title.setBorder(new EmptyBorder(18, 20, 0, 20));
+        dialog.add(title, BorderLayout.NORTH);
+
+        JTextField houseId = new JTextField();
+        JTextField type = new JTextField();
+        JTextField area = new JTextField();
+        JTextField address = new JTextField();
+        JTextField landlordId = new JTextField();
+        JTextField landlordName = new JTextField();
+        JTextField landlordContact = new JTextField();
+
+        JPanel body = new JPanel();
+        body.setOpaque(false);
+        body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+        body.setBorder(new EmptyBorder(16, 20, 0, 20));
+
+        body.add(groupLabel("房屋信息"));
+        body.add(twoColumnForm(
+                new String[]{"房屋ID", "户型", "面积(m²)", "地址"},
+                new JTextField[]{houseId, type, area, address}));
+        body.add(Box.createVerticalStrut(18));
+        body.add(groupLabel("房东信息"));
+        body.add(twoColumnForm(
+                new String[]{"房东ID", "姓名", "电话"},
+                new JTextField[]{landlordId, landlordName, landlordContact}));
+
+        dialog.add(body, BorderLayout.CENTER);
+
+        JButton cancel = secondaryOutlineButton("取消");
+        cancel.addActionListener(e -> dialog.dispose());
+
+        JButton submit = primaryButton("提交");
+        submit.addActionListener(e -> {
+            if (houseId.getText().trim().isEmpty()) {
+                JOptionPane.showMessageDialog(dialog, "房屋ID不能为空", "输入错误",
+                        JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            double areaValue;
+            try {
+                areaValue = Double.parseDouble(area.getText().trim());
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(dialog, "面积必须是数字", "输入错误",
+                        JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
+            boolean success = houseController.addHouse(
+                    houseId.getText().trim(),
+                    type.getText().trim(),
+                    areaValue,
+                    address.getText().trim(),
+                    landlordId.getText().trim(),
+                    landlordName.getText().trim(),
+                    landlordContact.getText().trim());
+
+            if (success) {
+                Toast.success(this, "房屋添加成功");
+                refresh();
+                dialog.dispose();
+            } else {
+                JOptionPane.showMessageDialog(dialog, "房屋添加失败", "错误",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
+        actions.setOpaque(false);
+        actions.setBorder(new EmptyBorder(20, 20, 18, 20));
+        actions.add(cancel);
+        actions.add(submit);
+        dialog.add(actions, BorderLayout.SOUTH);
+
+        dialog.pack();
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+    }
+
+    // ---------------------------------------------------------------- 小工具
+
+    private JLabel groupLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setFont(Theme.FONT_SUBTITLE);
+        label.setForeground(Theme.ACCENT);
+        label.setAlignmentX(LEFT_ALIGNMENT);
+        label.setBorder(new CompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.BORDER_LIGHT),
+                new EmptyBorder(0, 0, 6, 0)));
+        label.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+        return label;
+    }
+
+    /** 两列排布的表单：每行两组「标签 + 输入框」 */
+    private JPanel twoColumnForm(String[] labels, JTextField[] fields) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setOpaque(false);
+        panel.setAlignmentX(LEFT_ALIGNMENT);
+        panel.setBorder(new EmptyBorder(10, 0, 0, 0));
+
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        for (int i = 0; i < fields.length; i++) {
+            int column = (i % 2) * 2;
+            int row = i / 2;
+
+            JLabel label = new JLabel(labels[i]);
+            label.setFont(Theme.FONT_CAPTION);
+            label.setForeground(Theme.TEXT_SECONDARY);
+
+            JTextField field = fields[i];
+            field.setFont(Theme.FONT_BODY);
+            field.setPreferredSize(new Dimension(190, 30));
+
+            gbc.gridx = column;
+            gbc.gridy = row;
+            gbc.weightx = 0;
+            gbc.insets = new Insets(0, 0, 10, 10);
+            panel.add(label, gbc);
+
+            gbc.gridx = column + 1;
+            gbc.weightx = 1;
+            gbc.insets = new Insets(0, 0, 10, 18);
+            panel.add(field, gbc);
+        }
+        return panel;
+    }
+
+    private CompoundBorder outlineBorder(Color color) {
+        return new CompoundBorder(new LineBorder(color, 1, true),
+                new EmptyBorder(5, 14, 5, 14));
+    }
+
+    private JButton primaryButton(String text) {
+        JButton button = new JButton(text);
+        button.setFont(Theme.FONT_BODY);
+        button.setBackground(Theme.ACCENT);
+        button.setForeground(Theme.TEXT_ON_ACCENT);
+        button.setBorder(new EmptyBorder(6, 16, 6, 16));
+        button.setFocusPainted(false);
+        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        return button;
+    }
+
+    private JButton secondaryOutlineButton(String text) {
+        JButton button = new JButton(text);
+        button.setFont(Theme.FONT_BODY);
+        button.setBackground(Theme.SURFACE);
+        button.setForeground(Theme.TEXT_PRIMARY);
+        button.setBorder(outlineBorder(Theme.BORDER_INPUT));
+        button.setFocusPainted(false);
+        button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        return button;
     }
 }
