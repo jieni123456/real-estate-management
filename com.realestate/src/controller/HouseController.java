@@ -23,6 +23,8 @@ import java.util.List;
  *   <li>G-012  数据库异常转成用户能看懂的说明，且区分开「ID 已存在」与
  *       「数据库连不上」这类不同原因</li>
  *   <li>G-017  新增 / 编辑 / 删除 / 导出写操作日志</li>
+ *   <li>G-018  删除房屋时若其房东已无任何房屋引用，一并清理；由
+ *       {@link #countHousesByLandlord} 提供界面预告所需的数量</li>
  * </ul>
  *
  * <p>界面层已按权限把无权用户的删除按钮置灰，{@link #deleteHouse} 里仍会再查一次
@@ -174,6 +176,17 @@ public class HouseController {
      */
     public int countViewings(String houseId) {
         return viewingService.countByHouse(houseId);
+    }
+
+    /**
+     * 该房东名下的房屋数量（G-018）。
+     *
+     * <p>删除房屋时，若该房东名下再无其它房屋，删除会<b>一并清理房东记录</b>。
+     * 界面需要先告诉用户这件事——同样是「不能悄悄删」。数量为 1 即表示只挂着这一套，
+     * 删完房东就成孤儿了。
+     */
+    public int countHousesByLandlord(String landlordId) {
+        return houseService.countHousesByLandlord(landlordId);
     }
 
     // ---------------------------------------------------------------- 内部

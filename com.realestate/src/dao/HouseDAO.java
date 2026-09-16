@@ -22,6 +22,9 @@ import java.util.List;
  *   <li>G-010  房东与房屋两条写入包在同一事务中，避免出现孤儿数据</li>
  *   <li>G-012  SQL 异常不再被吞掉，改为抛出已归类的 {@link DataAccessException}，
  *       由 Controller 转成用户能看懂的说明</li>
+ *   <li>G-018  删除房屋、或编辑时把房屋改挂到别的房东名下之后，若原房东已无任何
+ *       房屋引用，在同一事务里一并清理——否则会留下界面上看不见、却一直躺在库里的
+ *       孤儿房东记录</li>
  * </ul>
  *
  * <p><b>房东信息的处理原则：INSERT IGNORE——不存在则创建，已存在则沿用原信息，
@@ -51,6 +54,30 @@ public class HouseDAO {
      */
     private static final String SELECT_LANDLORDS_SQL =
             "SELECT id, name, encrypted_contact FROM landlords ORDER BY id";
+
+    /**
+     * 房屋所属的房东 ID。
+     * 删除房屋、或编辑时改房东之前，先把原房东记下来，用于判断它是否变成孤儿（G-018）。
+     */
+    private static final String SELECT_LANDLORD_OF_HOUSE_SQL =
+            "SELECT landlord_id FROM houses WHERE id = ?";
+
+    private static final String DELETE_HOUSE_SQL = "DELETE FROM houses WHERE id = ?";
+
+    /**
+     * 删除「已无任何房屋引用」的房东（G-018）。
+     *
+     * <p>判断条件直接写进 DELETE 语句本身（{@code NOT EXISTS}），而不是先查数量、
+     * 再由 Java 决定删不删——后者在两步之间留出一个竞态窗口，前者由数据库在
+     * 一条语句内原子完成。
+     */
+    private static final String DELETE_ORPHAN_LANDLORD_SQL =
+            "DELETE FROM landlords WHERE id = ? "
+                    + "AND NOT EXISTS (SELECT 1 FROM houses WHERE landlord_id = landlords.id)";
+
+    /** 该房东名下的房屋数量。界面用它预告「删这套房会不会顺手删掉房东」（G-018） */
+    private static final String COUNT_HOUSES_OF_LANDLORD_SQL =
+            "SELECT COUNT(*) FROM houses WHERE landlord_id = ?";
 
     /** 房屋 ID 是否已存在。供「新增 / 编辑」区分与冲突提示使用 */
     public boolean exists(String houseId) {
@@ -98,6 +125,10 @@ public class HouseDAO {
             // 否则第二条失败时第一条已提交，库里会留下「有房东、无房屋」的孤儿数据。
             conn.setAutoCommit(false);
 
+            // G-018：编辑时先记下原房东。若本次把房屋改挂到别的房东名下，
+            // 原房东可能就此失去最后一个引用，需要在同一事务里清掉。
+            String previousLandlordId = update ? findLandlordId(conn, house.getId()) : null;
+
             try (PreparedStatement landlordStmt = conn.prepareStatement(LANDLORD_SQL)) {
                 landlordStmt.setString(1, house.getLandlord().getId());
                 landlordStmt.setString(2, house.getLandlord().getName());
@@ -123,6 +154,16 @@ public class HouseDAO {
                     houseStmt.setString(5, house.getLandlord().getId());
                 }
                 affected = houseStmt.executeUpdate();
+            }
+
+            // G-018：改房东后，原房东若已无任何房屋引用，一并清理。
+            // 注意只在「换了房东」时才检查，否则每次编辑都要多跑一条 DELETE。
+            if (previousLandlordId != null
+                    && !previousLandlordId.equals(house.getLandlord().getId())) {
+                int removed = deleteLandlordIfOrphan(conn, previousLandlordId);
+                if (removed > 0) {
+                    System.out.println("原房东已无房屋引用，一并清理: " + previousLandlordId);
+                }
             }
 
             conn.commit();
@@ -186,17 +227,93 @@ public class HouseDAO {
         return landlords;
     }
 
+    /**
+     * 删除房屋（G-018）。
+     *
+     * <p>整个动作在一个事务里完成三件事：记下该房屋的房东 → 删除房屋 → 该房东若已无
+     * 任何房屋引用则一并删除。放在同一事务是必要的：若删房东失败而删房屋已提交，
+     * 就留下了本次要消除的孤儿记录。
+     *
+     * <p>房屋之下的带看记录由数据库外键 {@code ON DELETE CASCADE} 自动清除，
+     * 无需在此处理（见 G-008）。
+     *
+     * @return 房屋不存在（可能是别人已删）时返回 false
+     */
     public boolean deleteHouse(String houseId) {
-        String sql = "DELETE FROM houses WHERE id = ?";
+        Connection conn = null;
+        try {
+            conn = DatabaseUtil.getConnection();
+            conn.setAutoCommit(false);
 
-        try (Connection conn = DatabaseUtil.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
+            String landlordId = findLandlordId(conn, houseId);
+            if (landlordId == null) {
+                conn.rollback();
+                return false;
+            }
 
-            stmt.setString(1, houseId);
-            return stmt.executeUpdate() > 0;
+            int affected;
+            try (PreparedStatement stmt = conn.prepareStatement(DELETE_HOUSE_SQL)) {
+                stmt.setString(1, houseId);
+                affected = stmt.executeUpdate();
+            }
+
+            int removedLandlords = deleteLandlordIfOrphan(conn, landlordId);
+
+            conn.commit();
+            System.out.println("删除房屋成功: " + houseId
+                    + (removedLandlords > 0 ? "（该房东已无其它房屋，一并清理）" : ""));
+            return affected > 0;
+
         } catch (SQLException e) {
+            rollbackQuietly(conn);
             System.err.println("删除房屋失败: " + e.getMessage());
             throw DataAccessException.from(e);
+        } finally {
+            closeQuietly(conn);
+        }
+    }
+
+    /** 该房东名下的房屋数量（G-018）。界面据此预告删除会连带清理房东 */
+    public int countHousesByLandlord(String landlordId) {
+        try (Connection conn = DatabaseUtil.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(COUNT_HOUSES_OF_LANDLORD_SQL)) {
+
+            stmt.setString(1, landlordId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        } catch (SQLException e) {
+            System.err.println("统计房东名下房屋数失败: " + e.getMessage());
+            throw DataAccessException.from(e);
+        }
+    }
+
+    // ------------------------------------------------------------ 房东辅助
+
+    /** 房屋所属的房东 ID。房屋不存在时返回 null */
+    private String findLandlordId(Connection conn, String houseId) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(SELECT_LANDLORD_OF_HOUSE_SQL)) {
+            stmt.setString(1, houseId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? rs.getString(1) : null;
+            }
+        }
+    }
+
+    /**
+     * 该房东若已无任何房屋引用则删除它（G-018）。
+     * 判断由 SQL 的 {@code NOT EXISTS} 完成，因此「刚查完就被别的房屋挂上」这种
+     * 情况不会误删。
+     *
+     * @return 实际删除的行数；仍被其它房屋引用时为 0
+     */
+    private int deleteLandlordIfOrphan(Connection conn, String landlordId) throws SQLException {
+        if (landlordId == null) {
+            return 0;
+        }
+        try (PreparedStatement stmt = conn.prepareStatement(DELETE_ORPHAN_LANDLORD_SQL)) {
+            stmt.setString(1, landlordId);
+            return stmt.executeUpdate();
         }
     }
 

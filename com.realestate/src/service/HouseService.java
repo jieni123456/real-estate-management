@@ -43,4 +43,9 @@ public class HouseService {
         System.out.println("删除房屋: " + houseId);
         return houseDAO.deleteHouse(houseId);
     }
+
+    /** 该房东名下的房屋数量，供界面预告删除会连带清理房东（G-018） */
+    public int countHousesByLandlord(String landlordId) {
+        return houseDAO.countHousesByLandlord(landlordId);
+    }
 }
