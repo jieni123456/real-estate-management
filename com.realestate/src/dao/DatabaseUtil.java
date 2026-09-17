@@ -6,6 +6,8 @@ import util.SecurityUtil;
 import javax.swing.*;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 
@@ -88,13 +90,16 @@ public class DatabaseUtil {
                     "name VARCHAR(100) NOT NULL, " +
                     "encrypted_contact TEXT NOT NULL)");
 
-            // 创建房屋表
+            // 创建房屋表。
+            // status 为房屋状态（R-003）：空置 / 已租出。默认空置，
+            // 这样既有的插入语句不写它也不会出错。
             stmt.execute("CREATE TABLE IF NOT EXISTS houses (" +
                     "id VARCHAR(50) PRIMARY KEY, " +
                     "type VARCHAR(50) NOT NULL, " +
                     "area DOUBLE NOT NULL, " +
                     "address VARCHAR(255) NOT NULL, " +
                     "landlord_id VARCHAR(50) NOT NULL, " +
+                    "status VARCHAR(10) NOT NULL DEFAULT '空置', " +
                     "FOREIGN KEY (landlord_id) REFERENCES landlords(id))");
 
             // 创建客户表
@@ -134,6 +139,16 @@ public class DatabaseUtil {
                     "FOREIGN KEY (house_id) REFERENCES houses(id) ON DELETE CASCADE, " +
                     "INDEX idx_viewings_viewed_at (viewed_at))");
 
+            // R-003：为改造前建的库补上 houses.status 列。
+            // 新建的库在上面的建表语句里已经带了该列，因此这里的判断只对旧库生效。
+            // 刻意不用 ALTER TABLE ... ADD COLUMN IF NOT EXISTS——那是 MariaDB 的扩展，
+            // MySQL 不支持；改为先查 information_schema，重复执行也安全。
+            if (!hasColumn(conn, "houses", "status")) {
+                stmt.execute("ALTER TABLE houses ADD COLUMN status VARCHAR(10) "
+                        + "NOT NULL DEFAULT '空置'");
+                System.out.println("已为 houses 表补充 status 列（R-003）");
+            }
+
             // 添加默认用户
             String adminPass = SecurityUtil.encryptPassword("admin123");
             String agentPass = SecurityUtil.encryptPassword("agent456");
@@ -151,6 +166,21 @@ public class DatabaseUtil {
             System.err.println("数据库初始化失败: " + e.getMessage());
             e.printStackTrace();
             showErrorDialog("数据库初始化失败: " + e.getMessage());
+        }
+    }
+
+    /** 某张表是否已有某列。用于给旧库做可重复执行的结构补充（R-003） */
+    private static boolean hasColumn(Connection conn, String table, String column)
+            throws SQLException {
+        String sql = "SELECT COUNT(*) FROM information_schema.columns "
+                + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, table);
+            stmt.setString(2, column);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() && rs.getInt(1) > 0;
+            }
         }
     }
 

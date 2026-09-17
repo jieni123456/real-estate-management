@@ -25,6 +25,9 @@ import java.util.List;
  *   <li>G-018  删除房屋、或编辑时把房屋改挂到别的房东名下之后，若原房东已无任何
  *       房屋引用，在同一事务里一并清理——否则会留下界面上看不见、却一直躺在库里的
  *       孤儿房东记录</li>
+ *   <li>R-003  房屋状态（空置 / 已租出）随房屋一起读写；
+ *       {@link #markRented} 供「带看成交」在同一事务里改状态，
+ *       {@link #updateStatus} 供房屋编辑里手改</li>
  * </ul>
  *
  * <p><b>房东信息的处理原则：INSERT IGNORE——不存在则创建，已存在则沿用原信息，
@@ -37,16 +40,22 @@ public class HouseDAO {
             "INSERT IGNORE INTO landlords (id, name, encrypted_contact) VALUES (?, ?, ?)";
 
     private static final String INSERT_HOUSE_SQL =
-            "INSERT INTO houses (id, type, area, address, landlord_id) VALUES (?, ?, ?, ?, ?)";
+            "INSERT INTO houses (id, type, area, address, landlord_id, status) "
+                    + "VALUES (?, ?, ?, ?, ?, ?)";
 
     private static final String UPDATE_HOUSE_SQL =
-            "UPDATE houses SET type = ?, area = ?, address = ?, landlord_id = ? WHERE id = ?";
+            "UPDATE houses SET type = ?, area = ?, address = ?, landlord_id = ?, status = ? "
+                    + "WHERE id = ?";
 
     private static final String SELECT_ALL_SQL =
-            "SELECT h.id, h.type, h.area, h.address, "
+            "SELECT h.id, h.type, h.area, h.address, h.status, "
                     + "l.id AS landlord_id, l.name AS landlord_name, l.encrypted_contact "
                     + "FROM houses h JOIN landlords l ON h.landlord_id = l.id "
                     + "ORDER BY h.id";
+
+    /** 单独更新房屋状态（房屋编辑里手改，含退租）。R-003 */
+    private static final String UPDATE_STATUS_SQL =
+            "UPDATE houses SET status = ? WHERE id = ?";
 
     /**
      * 全部房东。供「添加 / 编辑房屋」对话框的下拉选择使用（G-007）。
@@ -145,13 +154,15 @@ public class HouseDAO {
                     houseStmt.setDouble(2, house.getArea());
                     houseStmt.setString(3, house.getAddress());
                     houseStmt.setString(4, house.getLandlord().getId());
-                    houseStmt.setString(5, house.getId());
+                    houseStmt.setString(5, house.getStatus());
+                    houseStmt.setString(6, house.getId());
                 } else {
                     houseStmt.setString(1, house.getId());
                     houseStmt.setString(2, house.getType());
                     houseStmt.setDouble(3, house.getArea());
                     houseStmt.setString(4, house.getAddress());
                     houseStmt.setString(5, house.getLandlord().getId());
+                    houseStmt.setString(6, house.getStatus());
                 }
                 affected = houseStmt.executeUpdate();
             }
@@ -197,7 +208,8 @@ public class HouseDAO {
                         rs.getString("type"),
                         rs.getDouble("area"),
                         rs.getString("address"),
-                        landlord));
+                        landlord,
+                        rs.getString("status")));
             }
         } catch (SQLException e) {
             System.err.println("查询房屋列表失败: " + e.getMessage());
@@ -285,6 +297,28 @@ public class HouseDAO {
         } catch (SQLException e) {
             System.err.println("统计房东名下房屋数失败: " + e.getMessage());
             throw DataAccessException.from(e);
+        }
+    }
+
+    // ------------------------------------------------------------ 房屋状态
+
+    /**
+     * 在<b>调用方的事务里</b>把房屋置为「已租出」（R-003）。
+     *
+     * <p>刻意接收 {@link Connection} 而不是自己开连接：登记一条「已成交」的带看记录
+     * 与把房屋置为已租出必须同生共死，否则会出现「带看记录已写成已成交、房屋状态
+     * 却没改」的不一致。事务由调用方提交或回滚，本方法既不提交也不关闭连接。
+     *
+     * <p>手工改状态（含退租）走的是 {@link #updateHouse}——编辑对话框保存时整行
+     * 一起写，状态是其中一列，因此不需要单独的状态更新入口。
+     *
+     * @return 受影响行数；房屋不存在时为 0
+     */
+    public int markRented(Connection conn, String houseId) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(UPDATE_STATUS_SQL)) {
+            stmt.setString(1, House.STATUS_RENTED);
+            stmt.setString(2, houseId);
+            return stmt.executeUpdate();
         }
     }
 

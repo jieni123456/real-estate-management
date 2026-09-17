@@ -29,6 +29,7 @@ import javax.swing.JTable;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.ListSelectionModel;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
@@ -45,9 +46,13 @@ import java.awt.Cursor;
 import java.awt.Dialog;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.RenderingHints;
+import java.awt.geom.RoundRectangle2D;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.io.File;
@@ -60,10 +65,19 @@ import java.util.function.Consumer;
 public class HouseView extends JPanel {
 
     private static final String[] COLUMNS =
-            {"ID", "户型", "面积(m²)", "地址", "房东ID", "房东姓名", "房东电话"};
+            {"ID", "户型", "面积(m²)", "地址", "状态", "房东ID", "房东姓名", "房东电话"};
 
     /** 面积列的下标。它在模型里存 Double 而不是格式化后的字符串，见 createHouseTable */
     private static final int AREA_COLUMN = 2;
+
+    /**
+     * 状态列的下标（R-003）。刻意放在「地址」之后而不是排在最末：
+     * 它与「这是哪套房」一起扫视更自然，也不至于被房东电话列挤到看不见。
+     */
+    private static final int STATUS_COLUMN = 4;
+
+    /** 状态下拉里代表「不筛选」的选项 */
+    private static final String ALL_STATUSES = "全部";
 
     /** 房东下拉中代表「新建房东」的哨兵项 */
     private static final Object NEW_LANDLORD_ITEM = new Object() {
@@ -78,6 +92,8 @@ public class HouseView extends JPanel {
 
     private final JTable houseTable;
     private final JTextField searchField = new JTextField(16);
+    /** 状态筛选（R-003）：全部 / 空置 / 已租出 */
+    private final JComboBox<String> statusFilter = new JComboBox<>();
     private final JButton editButton = new JButton("编辑房屋");
     private final JButton deleteButton = new JButton("删除房屋");
 
@@ -153,7 +169,7 @@ public class HouseView extends JPanel {
         JPanel toolbar = new JPanel(new BorderLayout());
         toolbar.setOpaque(false);
         toolbar.add(buttons, BorderLayout.WEST);
-        toolbar.add(createSearchBox(), BorderLayout.EAST);
+        toolbar.add(createFilterBox(), BorderLayout.EAST);
 
         top.add(title, BorderLayout.NORTH);
         top.add(toolbar, BorderLayout.SOUTH);
@@ -161,14 +177,27 @@ public class HouseView extends JPanel {
     }
 
     /**
-     * 关键字搜索框（G-004）。输入即筛选，按 Esc 清空。
+     * 右侧的筛选区：状态下拉（R-003）+ 关键字搜索框（G-004）。两者叠加生效。
      *
      * <p>筛选在已读出的数据上做，不再打数据库——本系统的数据量是「一个中介门店」级别，
      * 全量加载后再过滤比每次输入都发一次 SQL 更简单也更快。
      */
-    private JPanel createSearchBox() {
+    private JPanel createFilterBox() {
+        statusFilter.setFont(Theme.FONT_BODY);
+        statusFilter.addItem(ALL_STATUSES);
+        for (String status : House.STATUSES) {
+            statusFilter.addItem(status);
+        }
+        statusFilter.setPreferredSize(new Dimension(92, 30));
+        statusFilter.setToolTipText("只看某一种状态的房屋");
+        statusFilter.addActionListener(e -> applyFilter());
+
+        JLabel statusCaption = new JLabel("状态");
+        statusCaption.setFont(Theme.FONT_CAPTION);
+        statusCaption.setForeground(Theme.TEXT_SECONDARY);
+
         searchField.setFont(Theme.FONT_BODY);
-        searchField.setPreferredSize(new Dimension(220, 30));
+        searchField.setPreferredSize(new Dimension(200, 30));
         searchField.putClientProperty("JTextField.placeholderText", "搜索 ID / 户型 / 地址 / 房东");
         searchField.putClientProperty("JTextField.showClearButton", true);
         searchField.setToolTipText("空格分隔多个关键字，需全部命中；按 Esc 清空");
@@ -197,8 +226,10 @@ public class HouseView extends JPanel {
             }
         });
 
-        JPanel box = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        JPanel box = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         box.setOpaque(false);
+        box.add(statusCaption);
+        box.add(statusFilter);
         box.add(searchField);
         return box;
     }
@@ -238,6 +269,7 @@ public class HouseView extends JPanel {
         // 因此排序之后「编辑 / 删除」拿到的仍是用户看到的那一行
         table.setAutoCreateRowSorter(true);
         table.getColumnModel().getColumn(AREA_COLUMN).setCellRenderer(new AreaCellRenderer());
+        table.getColumnModel().getColumn(STATUS_COLUMN).setCellRenderer(new StatusCellRenderer());
 
         JTableHeader header = table.getTableHeader();
         header.setFont(Theme.FONT_TABLE_HEADER);
@@ -267,12 +299,19 @@ public class HouseView extends JPanel {
         applyFilter();
     }
 
-    /** 按搜索框内容过滤并重建表格（G-004）。不重新查库 */
+    /**
+     * 按搜索关键字（G-004）与状态（R-003）过滤并重建表格。不重新查库。
+     * 两个条件是「与」的关系：先过状态，再看关键字。
+     */
     private void applyFilter() {
         String keyword = searchField.getText();
+        String status = selectedStatus();
 
         visibleHouses = new ArrayList<>();
         for (House house : allHouses) {
+            if (!matchesStatus(house, status)) {
+                continue;
+            }
             if (SearchMatcher.matches(keyword,
                     house.getId(), house.getType(), house.getAddress(),
                     house.getLandlord().getId(), house.getLandlord().getName(),
@@ -285,6 +324,16 @@ public class HouseView extends JPanel {
         reportStatus();
     }
 
+    /** 当前状态筛选值；「全部」表示不筛 */
+    private String selectedStatus() {
+        Object selected = statusFilter.getSelectedItem();
+        return selected == null ? ALL_STATUSES : selected.toString();
+    }
+
+    private boolean matchesStatus(House house, String status) {
+        return ALL_STATUSES.equals(status) || status.equals(house.getStatus());
+    }
+
     private void rebuildTable() {
         DefaultTableModel model = (DefaultTableModel) houseTable.getModel();
         model.setRowCount(0);
@@ -295,6 +344,7 @@ public class HouseView extends JPanel {
                     // 存原始数值，显示交给 AreaCellRenderer——这样排序才对
                     house.getArea(),
                     house.getAddress(),
+                    house.getStatus(),
                     house.getLandlord().getId(),
                     house.getLandlord().getName(),
                     house.getLandlord().getContact()
@@ -307,7 +357,10 @@ public class HouseView extends JPanel {
             return;
         }
 
-        if (SearchMatcher.isBlank(searchField.getText())) {
+        boolean filtered = !SearchMatcher.isBlank(searchField.getText())
+                || !ALL_STATUSES.equals(selectedStatus());
+
+        if (!filtered) {
             statusReporter.accept("共 " + allHouses.size() + " 条房屋记录");
         } else if (visibleHouses.isEmpty()) {
             statusReporter.accept("未找到匹配的房屋（共 " + allHouses.size() + " 条）");
@@ -470,6 +523,14 @@ public class HouseView extends JPanel {
         JTextField area = new JTextField(editing ? Formats.area(existing.getArea()) : "");
         JTextField address = new JTextField(editing ? existing.getAddress() : "");
 
+        // R-003：状态是房屋自己的属性，随保存一起写。
+        // 它是下拉而不是文本框，所以独占一行放在「房屋信息」组末尾（与下面「房东」行同一写法），
+        // 挤进两列网格会与其他字段对不齐。
+        JComboBox<String> statusBox = new JComboBox<>(House.STATUSES);
+        statusBox.setFont(Theme.FONT_BODY);
+        statusBox.setSelectedItem(editing ? existing.getStatus() : House.STATUS_VACANT);
+        statusBox.setToolTipText("房子租出去了改成「已租出」；租客退租再改回「空置」");
+
         // 房东三个字段的内容由下拉框决定：选中已有房东 → 填入并置只读；选「新建房东」→ 可填写
         JTextField landlordId = new JTextField();
         JTextField landlordName = new JTextField();
@@ -494,6 +555,7 @@ public class HouseView extends JPanel {
         body.add(twoColumnForm(
                 new String[]{"房屋ID", "户型", "面积(m²)", "地址"},
                 new JTextField[]{houseId, type, area, address}));
+        body.add(labeledRow("状态", statusBox));
         body.add(Box.createVerticalStrut(18));
         body.add(groupLabel("房东信息"));
         body.add(labeledRow("房东", landlordBox));
@@ -517,13 +579,17 @@ public class HouseView extends JPanel {
                 return;
             }
 
+            String statusValue = (String) statusBox.getSelectedItem();
+
             Result result = editing
                     ? houseController.updateHouse(
                             houseId.getText(), type.getText(), areaValue, address.getText(),
-                            landlordId.getText(), landlordName.getText(), landlordContact.getText())
+                            landlordId.getText(), landlordName.getText(), landlordContact.getText(),
+                            statusValue)
                     : houseController.addHouse(
                             houseId.getText(), type.getText(), areaValue, address.getText(),
-                            landlordId.getText(), landlordName.getText(), landlordContact.getText());
+                            landlordId.getText(), landlordName.getText(), landlordContact.getText(),
+                            statusValue);
 
             if (result.isSuccess()) {
                 Toast.success(this, result.getMessage());
@@ -665,6 +731,7 @@ public class HouseView extends JPanel {
             rows.add(new String[]{
                     house.getId(), house.getType(),
                     Formats.area(house.getArea()), house.getAddress(),
+                    house.getStatus(),
                     house.getLandlord().getId(), house.getLandlord().getName(),
                     house.getLandlord().getContact()});
         }
@@ -796,6 +863,69 @@ public class HouseView extends JPanel {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
             setText(value instanceof Number ? Formats.area(((Number) value).doubleValue()) : "");
             return this;
+        }
+    }
+
+    /**
+     * 状态列渲染为圆角标签（R-003）。
+     *
+     * <p>「已租出」用主色实底 + 白字，「空置」用浅灰底 + 次级文字色：两者的视觉重量
+     * 刻意不同，扫一眼就能分出哪些房子还在手上。
+     *
+     * <p>选中行时不再画标签，只留文字并改用选中前景色——否则标签底色会和表格的选中
+     * 底色叠在一起，反而看不清。
+     */
+    private static final class StatusCellRenderer extends DefaultTableCellRenderer {
+
+        private static final int PILL_HEIGHT = 20;
+        private static final int PILL_PADDING = 20;
+
+        /** 当前这一格是否处于选中状态。渲染器实例由表格复用，因此需要记下来供绘制使用 */
+        private boolean selected;
+
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                                                       boolean isSelected, boolean hasFocus,
+                                                       int row, int column) {
+            super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+
+            this.selected = isSelected;
+            setText(value == null ? "" : value.toString());
+            setOpaque(false);
+            setHorizontalAlignment(SwingConstants.CENTER);
+
+            if (isSelected) {
+                setForeground(table.getSelectionForeground());
+            } else {
+                setForeground(House.STATUS_RENTED.equals(getText())
+                        ? Theme.TEXT_ON_ACCENT : Theme.TEXT_SECONDARY);
+            }
+            return this;
+        }
+
+        @Override
+        public void paintComponent(Graphics g) {
+            if (!selected && !getText().isEmpty()) {
+                paintPill(g);
+            }
+            super.paintComponent(g);
+        }
+
+        private void paintPill(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setColor(House.STATUS_RENTED.equals(getText())
+                    ? Theme.ACCENT : Theme.DISABLED_BG);
+
+            int textWidth = getFontMetrics(getFont()).stringWidth(getText());
+            int width = Math.min(getWidth() - 8, textWidth + PILL_PADDING);
+            int x = Math.max(4, (getWidth() - width) / 2);
+            int y = Math.max(0, (getHeight() - PILL_HEIGHT) / 2);
+
+            g2.fill(new RoundRectangle2D.Double(x, y, width, PILL_HEIGHT,
+                    PILL_HEIGHT, PILL_HEIGHT));
+            g2.dispose();
         }
     }
 

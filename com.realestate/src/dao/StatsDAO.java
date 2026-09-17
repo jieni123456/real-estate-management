@@ -1,5 +1,6 @@
 package dao;
 
+import model.House;
 import model.Overview;
 
 import java.sql.Connection;
@@ -14,6 +15,8 @@ import java.util.List;
  *
  * <p>全部查询共用一条连接，避免为一个页面反复建立连接。
  * 这些语句都是只读聚合，不涉及事务。
+ *
+ * <p>R-003：增加「空置房源」计数（原「平均面积」已从概览页移除）。
  */
 public class StatsDAO {
 
@@ -21,7 +24,14 @@ public class StatsDAO {
     private static final String COUNT_CUSTOMERS = "SELECT COUNT(*) FROM customers";
     private static final String COUNT_LANDLORDS = "SELECT COUNT(*) FROM landlords";
     private static final String COUNT_VIEWINGS = "SELECT COUNT(*) FROM viewings";
-    private static final String AVERAGE_AREA = "SELECT AVG(area) FROM houses";
+
+    /**
+     * 按状态数房源（R-003）。
+     * 状态用参数传入，而不是在 SQL 里写死中文字面量——取值只在 {@link House} 里定义一份。
+     */
+    private static final String COUNT_HOUSES_BY_STATUS =
+            "SELECT COUNT(*) FROM houses WHERE status = ?";
+
     private static final String TYPE_DISTRIBUTION =
             "SELECT type, COUNT(*) AS total FROM houses GROUP BY type ORDER BY total DESC, type";
 
@@ -32,11 +42,11 @@ public class StatsDAO {
             int customerCount = count(conn, COUNT_CUSTOMERS);
             int landlordCount = count(conn, COUNT_LANDLORDS);
             int viewingCount = count(conn, COUNT_VIEWINGS);
-            double averageArea = averageArea(conn);
+            int vacantCount = countHousesByStatus(conn, House.STATUS_VACANT);
             List<Overview.TypeCount> typeCounts = typeDistribution(conn);
 
             return new Overview(houseCount, customerCount, landlordCount, viewingCount,
-                    averageArea, typeCounts);
+                    vacantCount, typeCounts);
 
         } catch (SQLException e) {
             System.err.println("统计查询失败: " + e.getMessage());
@@ -52,15 +62,13 @@ public class StatsDAO {
         }
     }
 
-    /** 房屋表为空时 AVG 返回 NULL，需用 wasNull 区分「0 套房的平均值」与「平均值为 0」 */
-    private double averageArea(Connection conn) throws SQLException {
-        try (PreparedStatement stmt = conn.prepareStatement(AVERAGE_AREA);
-             ResultSet rs = stmt.executeQuery()) {
-            if (rs.next()) {
-                double value = rs.getDouble(1);
-                return rs.wasNull() ? 0 : value;
+    /** 某状态的房源数（R-003） */
+    private int countHousesByStatus(Connection conn, String status) throws SQLException {
+        try (PreparedStatement stmt = conn.prepareStatement(COUNT_HOUSES_BY_STATUS)) {
+            stmt.setString(1, status);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
             }
-            return 0;
         }
     }
 

@@ -47,7 +47,7 @@ public class ViewingController {
                 return Result.fail("保存失败：记录未写入。");
             }
             logService.record("新增带看", customerId + " → " + houseId, note);
-            return Result.ok("带看记录添加成功");
+            return Result.ok(messageFor("带看记录添加成功", viewing));
 
         } catch (DataAccessException e) {
             return Result.fail(e.userMessage());
@@ -70,7 +70,7 @@ public class ViewingController {
                 return Result.fail("保存失败：该带看记录已不存在。");
             }
             logService.record("编辑带看", customerId + " → " + houseId, result);
-            return Result.ok("带看记录已更新");
+            return Result.ok(messageFor("带看记录已更新", viewing));
 
         } catch (DataAccessException e) {
             return Result.fail(e.userMessage());
@@ -128,6 +128,16 @@ public class ViewingController {
     }
 
     // ---------------------------------------------------------------- 内部
+
+    /**
+     * R-003：结果为「已成交」时，房屋会在同一事务里被置为「已租出」。
+     * 成功提示里带一句说明，免得用户以为系统在背后改数据。
+     */
+    private String messageFor(String base, Viewing viewing) {
+        return Viewing.RESULT_DEAL.equals(viewing.getResult())
+                ? base + "（房屋 " + viewing.getHouseId() + " 已置为「已租出」）"
+                : base;
+    }
 
     private Viewing build(long id, String customerId, String houseId, LocalDateTime viewedAt,
                           String result, String note) {

@@ -25,6 +25,8 @@ import java.util.List;
  *   <li>G-017  新增 / 编辑 / 删除 / 导出写操作日志</li>
  *   <li>G-018  删除房屋时若其房东已无任何房屋引用，一并清理；由
  *       {@link #countHousesByLandlord} 提供界面预告所需的数量</li>
+ *   <li>R-003  房屋状态（空置 / 已租出）作为房屋属性随新增 / 编辑一起保存，
+ *       并校验取值合法性。带看成交时的自动置位在 ViewingDAO 的同事务里完成</li>
  * </ul>
  *
  * <p>界面层已按权限把无权用户的删除按钮置灰，{@link #deleteHouse} 里仍会再查一次
@@ -45,8 +47,10 @@ public class HouseController {
      * 原先 DAO 用的是 INSERT ... ON DUPLICATE KEY UPDATE，会把已有房屋静默改写。
      */
     public Result addHouse(String id, String type, double area, String address,
-                           String landlordId, String landlordName, String landlordContact) {
-        House house = buildHouse(id, type, area, address, landlordId, landlordName, landlordContact);
+                           String landlordId, String landlordName, String landlordContact,
+                           String status) {
+        House house = buildHouse(id, type, area, address, landlordId, landlordName,
+                landlordContact, status);
 
         String invalid = validate(house);
         if (invalid != null) {
@@ -84,8 +88,10 @@ public class HouseController {
      * 房屋ID 不可修改（界面上该字段为只读），因此这里用 ID 定位记录。
      */
     public Result updateHouse(String id, String type, double area, String address,
-                              String landlordId, String landlordName, String landlordContact) {
-        House house = buildHouse(id, type, area, address, landlordId, landlordName, landlordContact);
+                              String landlordId, String landlordName, String landlordContact,
+                              String status) {
+        House house = buildHouse(id, type, area, address, landlordId, landlordName,
+                landlordContact, status);
 
         String invalid = validate(house);
         if (invalid != null) {
@@ -192,9 +198,11 @@ public class HouseController {
     // ---------------------------------------------------------------- 内部
 
     private House buildHouse(String id, String type, double area, String address,
-                             String landlordId, String landlordName, String landlordContact) {
+                             String landlordId, String landlordName, String landlordContact,
+                             String status) {
         Landlord landlord = new Landlord(trim(landlordId), trim(landlordName), trim(landlordContact));
-        return new House(trim(id), trim(type), area, trim(address), landlord);
+        // 状态留空时 House 会取默认值「空置」，新增时下拉本就默认空置，不必额外处理
+        return new House(trim(id), trim(type), area, trim(address), landlord, trim(status));
     }
 
     /** 校验通过返回 null，否则返回给用户看的原因 */
@@ -214,6 +222,10 @@ public class HouseController {
         error = Validators.requiredText("地址", house.getAddress(), 255);
         if (error != null) {
             return error;
+        }
+        // R-003：状态由下拉提供，正常选不出非法值；仍校验一次，防止绕过界面直接调用
+        if (!House.isValidStatus(house.getStatus())) {
+            return "房屋状态取值不合法，请从下拉列表中选择";
         }
         error = Validators.requiredText("房东ID", house.getLandlord().getId(), 50);
         if (error != null) {

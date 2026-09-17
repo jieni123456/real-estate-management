@@ -495,6 +495,7 @@ public class ViewingView extends JPanel {
                 Toast.success(this, outcome.getMessage());
                 refresh();
                 dialog.dispose();
+                noticeIfStatusNotReverted(editing, existing, result);
             } else {
                 warn(dialog, outcome.getMessage());
             }
@@ -544,6 +545,27 @@ public class ViewingView extends JPanel {
     }
 
     // ---------------------------------------------------------------- 小工具
+
+    /**
+     * R-003：把「已成交」改成其它结果时，房屋状态<b>不会</b>自动跟着回退，这里提示一下。
+     *
+     * <p>刻意只提示、不代改。两种错误的代价不对称：把已租出当空置会导致重复推荐
+     * （对客户失信），把空置当已租出只是少推一套。释放必须由人到房屋页确认。
+     * 不提示的话，用户会以为这是 bug。详见需求报告 4.3。
+     */
+    private void noticeIfStatusNotReverted(boolean editing, Viewing previous, String newResult) {
+        if (!editing || previous == null
+                || !Viewing.RESULT_DEAL.equals(previous.getResult())
+                || Viewing.RESULT_DEAL.equals(newResult)) {
+            return;
+        }
+        JOptionPane.showMessageDialog(this,
+                "这条记录原本是「已成交」，房屋 " + previous.getHouseId()
+                        + " 目前的状态仍为「已租出」。\n\n"
+                        + "房屋状态不会随带看记录自动改回——若该房屋已经不再出租，\n"
+                        + "请到「房屋管理」页把它的状态改回「空置」。",
+                "房屋状态未变动", JOptionPane.INFORMATION_MESSAGE);
+    }
 
     private void warn(Component parent, String message) {
         JOptionPane.showMessageDialog(parent, message, "无法保存", JOptionPane.WARNING_MESSAGE);
