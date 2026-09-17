@@ -12,6 +12,7 @@ import util.Permissions;
 import util.Result;
 import util.Session;
 import util.Validators;
+import util.ViewingRules;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,6 +22,9 @@ import java.util.List;
  *
  * <p>这是客户与房屋之间唯一的业务关联：谁在什么时候看了哪套房、结果如何。
  * 在此之前两张表完全孤立，系统无法回答「这个客户看过哪些房」这类最基本的问题。
+ *
+ * <p>G-020：只有「空置」的房源可以登记带看。已租出的房子继续带看别人在现实里
+ * 不会发生，所以这里拦一道；界面上的房屋下拉也做了同样的过滤。
  */
 public class ViewingController {
 
@@ -40,6 +44,11 @@ public class ViewingController {
         String invalid = validate(viewing);
         if (invalid != null) {
             return Result.fail(invalid);
+        }
+
+        String blocked = checkHouseAvailable(viewing.getHouseId(), null);
+        if (blocked != null) {
+            return Result.fail(blocked);
         }
 
         try {
@@ -63,6 +72,22 @@ public class ViewingController {
         String invalid = validate(viewing);
         if (invalid != null) {
             return Result.fail(invalid);
+        }
+
+        // 先取原记录：既用于「房屋有没有被换过」的判断，也把「记录已不存在」提前到这里
+        Viewing previous;
+        try {
+            previous = viewingService.getById(id);
+        } catch (DataAccessException e) {
+            return Result.fail(e.userMessage());
+        }
+        if (previous == null) {
+            return Result.fail("保存失败：该带看记录已不存在。");
+        }
+
+        String blocked = checkHouseAvailable(viewing.getHouseId(), previous.getHouseId());
+        if (blocked != null) {
+            return Result.fail(blocked);
         }
 
         try {
@@ -185,5 +210,29 @@ public class ViewingController {
 
     private String trim(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    /**
+     * G-020：已租出的房子不能再登记带看。
+     *
+     * <p>编辑时若房屋没被换过则放行，否则连改个备注都会被拦下。
+     * 界面层的下拉已按同一条规则过滤（见 {@link ViewingRules#selectable}），
+     * 这里是兜底——界面过滤只是体验，逻辑层必须自己站得住。
+     *
+     * @param originalHouseId 编辑前的房屋 ID；新增时传 null
+     * @return 通过返回 null，否则返回给用户看的原因
+     */
+    private String checkHouseAvailable(String houseId, String originalHouseId) {
+        if (houseId.equals(originalHouseId)) {
+            return null;
+        }
+
+        String status;
+        try {
+            status = houseService.getHouseStatus(houseId);
+        } catch (DataAccessException e) {
+            return e.userMessage();
+        }
+        return ViewingRules.blockReason(houseId, status);
     }
 }

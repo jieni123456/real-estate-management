@@ -28,6 +28,14 @@ public class HouseService {
         return houseDAO.landlordExists(landlordId);
     }
 
+    /**
+     * 房屋当前状态；房屋不存在时返回 {@code null}。
+     * 供「已租出的房子不能再登记带看」这条规则判断（G-020）。
+     */
+    public String getHouseStatus(String houseId) {
+        return houseDAO.findStatus(houseId);
+    }
+
     public List<House> getAllHouses() {
         System.out.println("从DAO获取所有房屋");
         return houseDAO.getAllHouses();

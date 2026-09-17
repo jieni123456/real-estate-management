@@ -10,6 +10,7 @@ import util.Formats;
 import util.Result;
 import util.SearchMatcher;
 import util.Theme;
+import util.ViewingRules;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -396,16 +397,28 @@ public class ViewingView extends JPanel {
 
         // 客户与房源是这条记录的必填关联，两者缺一都登记不了
         List<Customer> customers;
-        List<House> houses;
+        List<House> allHouses;
         try {
             customers = viewingController.getAllCustomers();
-            houses = viewingController.getAllHouses();
+            allHouses = viewingController.getAllHouses();
         } catch (DataAccessException e) {
             showError(this, "读取失败", e.userMessage());
             return;
         }
-        if (customers.isEmpty() || houses.isEmpty()) {
+        if (customers.isEmpty()) {
             warn(this, "请先添加客户与房屋，才能登记带看记录");
+            return;
+        }
+
+        // G-020：已租出的房子不能再登记带看，所以下拉里只放空置房源。
+        // 唯一的例外是编辑时这条记录原本挂着的房源——房子后来租出去了，
+        // 也得允许把备注改完，否则这条记录就动不了了。
+        // 过滤规则由 ViewingRules 统一提供，与控制器里的兜底拦截是同一个定义
+        List<House> selectableHouses = ViewingRules.selectable(allHouses,
+                editing ? existing.getHouseId() : null);
+        if (selectableHouses.isEmpty()) {
+            warn(this, "当前没有空置房源，无法登记带看。\n"
+                    + "已租出的房源如需重新带看，请先到「房屋管理」把它改回「空置」。");
             return;
         }
 
@@ -431,7 +444,8 @@ public class ViewingView extends JPanel {
         houseBox.setFont(Theme.FONT_BODY);
         houseBox.setMaximumRowCount(12);
         houseBox.setRenderer(new NamedRenderer());
-        for (House house : houses) {
+        houseBox.setToolTipText("只列出空置房源。已租出的房源需先改回「空置」才能登记带看");
+        for (House house : selectableHouses) {
             houseBox.addItem(house);
         }
 
@@ -702,7 +716,10 @@ public class ViewingView extends JPanel {
                 display = item.getId() + " · " + item.getName();
             } else if (value instanceof House) {
                 House item = (House) value;
-                display = item.getId() + " · " + item.getAddress();
+                // 已租出的房源正常不会出现在这里，只有「编辑一条挂在已租出房源上的
+                // 旧记录」时会，标出来免得用户以为过滤没生效（G-020）
+                display = item.getId() + " · " + item.getAddress()
+                        + (item.isRented() ? "　（已租出）" : "");
             }
             Component component = super.getListCellRendererComponent(
                     list, display, index, isSelected, cellHasFocus);

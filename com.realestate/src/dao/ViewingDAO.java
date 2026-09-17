@@ -35,14 +35,20 @@ public class ViewingDAO {
      */
     private final HouseDAO houseDAO = new HouseDAO();
 
-    private static final String SELECT_ALL_SQL =
+    /** 列表与按 ID 查询共用的投影与连接，避免两处各写一遍列名 */
+    private static final String SELECT_BASE =
             "SELECT v.id, v.customer_id, c.name AS customer_name, "
                     + "v.house_id, h.address AS house_address, "
                     + "v.viewed_at, v.result, v.note "
                     + "FROM viewings v "
                     + "JOIN customers c ON v.customer_id = c.id "
-                    + "JOIN houses h ON v.house_id = h.id "
-                    + "ORDER BY v.viewed_at DESC, v.id DESC";
+                    + "JOIN houses h ON v.house_id = h.id";
+
+    private static final String SELECT_ALL_SQL =
+            SELECT_BASE + " ORDER BY v.viewed_at DESC, v.id DESC";
+
+    /** 按主键取单条。编辑时用它拿「原来的房屋」，判断房屋有没有被换过（G-020） */
+    private static final String SELECT_BY_ID_SQL = SELECT_BASE + " WHERE v.id = ?";
 
     private static final String INSERT_SQL =
             "INSERT INTO viewings (customer_id, house_id, viewed_at, result, note) "
@@ -75,6 +81,28 @@ public class ViewingDAO {
             throw DataAccessException.from(e);
         }
         return viewings;
+    }
+
+    /**
+     * 按主键取单条带看记录。
+     *
+     * <p>编辑带看时的前置校验需要知道「这条记录原来挂在哪套房上」——只有房子没被换过，
+     * 才允许它继续挂在「已租出」的房源上（否则改个备注都会被拦下）。G-020
+     *
+     * @return 记录不存在时返回 {@code null}
+     */
+    public Viewing findById(long id) {
+        try (Connection conn = DatabaseUtil.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(SELECT_BY_ID_SQL)) {
+
+            stmt.setLong(1, id);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? read(rs) : null;
+            }
+        } catch (SQLException e) {
+            System.err.println("查询带看记录失败: " + e.getMessage());
+            throw DataAccessException.from(e);
+        }
     }
 
     /**

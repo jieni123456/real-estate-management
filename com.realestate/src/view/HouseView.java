@@ -872,16 +872,21 @@ public class HouseView extends JPanel {
      * <p>「已租出」用主色实底 + 白字，「空置」用浅灰底 + 次级文字色：两者的视觉重量
      * 刻意不同，扫一眼就能分出哪些房子还在手上。
      *
-     * <p>选中行时不再画标签，只留文字并改用选中前景色——否则标签底色会和表格的选中
-     * 底色叠在一起，反而看不清。
+     * <p><b>底色必须由渲染器自己画。</b>表格不会替渲染器补选中底色——把组件设成
+     * 不透明、指望「露出」下面那一层的选中色，实际露出来的是表格的白底，而文字用的是
+     * 选中前景色（白），于是成了白字白底，整格什么都看不见。实测像素：未选中格
+     * 33 种颜色（有标签有文字），选中格只剩 2 种（白底 + 一条网格线）。
+     *
+     * <p>选中行整行是主色底，标签若还用主色实底就会糊成一片，因此选中时标签反白
+     * （白底 + 状态色文字）。底部留 1 像素不填，与其他列的网格线保持一致。
      */
     private static final class StatusCellRenderer extends DefaultTableCellRenderer {
 
         private static final int PILL_HEIGHT = 20;
         private static final int PILL_PADDING = 20;
 
-        /** 当前这一格是否处于选中状态。渲染器实例由表格复用，因此需要记下来供绘制使用 */
-        private boolean selected;
+        /** 本次绘制要用的标签底色，由 {@link #getTableCellRendererComponent} 按状态与选中与否算好 */
+        private Color pillColor = Theme.DISABLED_BG;
 
         @Override
         public Component getTableCellRendererComponent(JTable table, Object value,
@@ -889,23 +894,34 @@ public class HouseView extends JPanel {
                                                        int row, int column) {
             super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 
-            this.selected = isSelected;
             setText(value == null ? "" : value.toString());
-            setOpaque(false);
             setHorizontalAlignment(SwingConstants.CENTER);
+            // 保持不透明，底色由 paintComponent 自己填（见类注释）
+            setOpaque(false);
 
+            boolean rented = House.STATUS_RENTED.equals(getText());
             if (isSelected) {
-                setForeground(table.getSelectionForeground());
+                pillColor = Theme.SURFACE;
+                setForeground(rented ? Theme.ACCENT : Theme.TEXT_SECONDARY);
             } else {
-                setForeground(House.STATUS_RENTED.equals(getText())
-                        ? Theme.TEXT_ON_ACCENT : Theme.TEXT_SECONDARY);
+                pillColor = rented ? Theme.ACCENT : Theme.DISABLED_BG;
+                setForeground(rented ? Theme.TEXT_ON_ACCENT : Theme.TEXT_SECONDARY);
             }
+
+            // 选中底色必须自己填，否则这一格会露出表格白底
+            setBackground(isSelected ? table.getSelectionBackground() : table.getBackground());
             return this;
         }
 
         @Override
         public void paintComponent(Graphics g) {
-            if (!selected && !getText().isEmpty()) {
+            // 顺序不能反：底色 → 标签 → 文字。
+            // 父类在 opaque=false 时只画文字，不会把标签盖掉。
+            // 高度减 1：把最后一行留给网格线，与其它列的画法一致。
+            g.setColor(getBackground());
+            g.fillRect(0, 0, getWidth(), Math.max(0, getHeight() - 1));
+
+            if (!getText().isEmpty()) {
                 paintPill(g);
             }
             super.paintComponent(g);
@@ -915,8 +931,7 @@ public class HouseView extends JPanel {
             Graphics2D g2 = (Graphics2D) g.create();
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                     RenderingHints.VALUE_ANTIALIAS_ON);
-            g2.setColor(House.STATUS_RENTED.equals(getText())
-                    ? Theme.ACCENT : Theme.DISABLED_BG);
+            g2.setColor(pillColor);
 
             int textWidth = getFontMetrics(getFont()).stringWidth(getText());
             int width = Math.min(getWidth() - 8, textWidth + PILL_PADDING);

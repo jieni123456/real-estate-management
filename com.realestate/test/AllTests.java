@@ -33,6 +33,7 @@ public final class AllTests {
         ExportTest.run(runner);
         ViewingTest.run(runner);
         HouseTest.run(runner);
+        ViewingRulesTest.run(runner);
 
         int failed = runner.report();
         System.exit(failed == 0 ? 0 : 1);

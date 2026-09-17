@@ -73,6 +73,9 @@ public class HouseDAO {
 
     private static final String DELETE_HOUSE_SQL = "DELETE FROM houses WHERE id = ?";
 
+    /** 只取状态。见 {@link #findStatus} */
+    private static final String SELECT_STATUS_SQL = "SELECT status FROM houses WHERE id = ?";
+
     /**
      * 删除「已无任何房屋引用」的房东（G-018）。
      *
@@ -87,6 +90,29 @@ public class HouseDAO {
     /** 该房东名下的房屋数量。界面用它预告「删这套房会不会顺手删掉房东」（G-018） */
     private static final String COUNT_HOUSES_OF_LANDLORD_SQL =
             "SELECT COUNT(*) FROM houses WHERE landlord_id = ?";
+
+    /**
+     * 只取房屋状态，不读整行。
+     *
+     * <p>供「已租出的房子不能再登记带看」这条规则判断（需求报告 G-020）使用。
+     * 单独查询而不是复用 {@link #getAllHouses()}：登记带看是写操作的前置校验，
+     * 没必要把全部房屋连同房东联系方式一起查出来再解密。
+     *
+     * @return 房屋不存在时返回 {@code null}
+     */
+    public String findStatus(String houseId) {
+        try (Connection conn = DatabaseUtil.getConnection();
+             PreparedStatement stmt = conn.prepareStatement(SELECT_STATUS_SQL)) {
+
+            stmt.setString(1, houseId);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? rs.getString(1) : null;
+            }
+        } catch (SQLException e) {
+            System.err.println("查询房屋状态失败: " + e.getMessage());
+            throw DataAccessException.from(e);
+        }
+    }
 
     /** 房屋 ID 是否已存在。供「新增 / 编辑」区分与冲突提示使用 */
     public boolean exists(String houseId) {

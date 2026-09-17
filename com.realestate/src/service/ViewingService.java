@@ -14,6 +14,11 @@ public class ViewingService {
         return viewingDAO.getAll();
     }
 
+    /** 单条带看记录；不存在时返回 null。编辑时的前置校验用（G-020） */
+    public Viewing getById(long id) {
+        return viewingDAO.findById(id);
+    }
+
     public boolean insertViewing(Viewing viewing) {
         System.out.println("新增带看记录: 客户 " + viewing.getCustomerId()
                 + " → 房屋 " + viewing.getHouseId());
