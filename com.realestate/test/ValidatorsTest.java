@@ -65,7 +65,7 @@ public final class ValidatorsTest {
         t.check("面积为 0 被拒", Validators.positiveNumber("面积", 0) != null);
         t.check("面积为负被拒", Validators.positiveNumber("面积", -5) != null);
 
-        t.isNull("初始口令 admin123 通过（不能比它更严，否则用户改完就登不进来）",
+        t.isNull("预设初始口令通过（不能比它更严，否则用户改完就登不进来）",
                 Validators.password("新密码", "admin123"));
         t.isNull("6 位刚好通过", Validators.password("新密码", "123456"));
         t.isNull("20 位刚好通过", Validators.password("新密码", "12345678901234567890"));

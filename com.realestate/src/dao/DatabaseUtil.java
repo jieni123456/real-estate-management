@@ -153,8 +153,9 @@ public class DatabaseUtil {
             String adminPass = SecurityUtil.encryptPassword("admin123");
             String agentPass = SecurityUtil.encryptPassword("agent456");
 
-            System.out.println("admin123 加密: " + adminPass);
-            System.out.println("agent456 加密: " + agentPass);
+            // 调试输出只打印密文，不打印口令本身
+            System.out.println("初始管理员口令密文: " + adminPass);
+            System.out.println("初始经纪人口令密文: " + agentPass);
 
             stmt.executeUpdate("INSERT IGNORE INTO users VALUES " +
                     "('admin', '" + adminPass + "', 'ADMIN'), " +
